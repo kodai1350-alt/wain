@@ -1,5 +1,6 @@
 """
-VRChat 用ワインボトル (ボルドー型) を作成して FBX で書き出す Blender スクリプト。
+VRChat 用ワインボトル (シェリー型 / PEARCHAN OLOROSO) を作成して FBX で書き出す
+Blender スクリプト (Blender 5.1 で動作確認)。
 
 使い方 (どちらでも可):
   A) Blender の Scripting タブでこのファイルを開いて「スクリプト実行」(Alt+P)
@@ -13,7 +14,7 @@ VRChat 用ワインボトル (ボルドー型) を作成して FBX で書き出�
 仕様:
   - 立てた状態。Unity では Y が上、注ぎ口が真上 (FBX 書き出し時に Z-up → Y-up 変換)
   - 高さ 30cm / 太さ (直径) 7cm。原点は底面の中心
-  - 約 1,800 三角形、マテリアル 1 個 (テクスチャアトラス 1 枚)
+  - 約 2,100 三角形、マテリアル 1 個 (テクスチャアトラス 1 枚)
   - 中の液体なし (外側の瓶だけ)
   - ラベルの正面は Blender の -Y 側 (正面ビューで見える側)
 
@@ -33,7 +34,7 @@ import bmesh
 # ---------------------------------------------------------------- 設定
 HEIGHT = 0.30          # 高さ (m)
 DIAMETER = 0.07        # 胴の直径 (m)
-SEGMENTS = 40          # 円周の分割数 (三角形数はおよそ 50 x SEGMENTS)
+SEGMENTS = 40          # 円周の分割数 (三角形数はおよそ 52 x SEGMENTS)
 OUTPUT_DIR = ""        # 空なら: .blend のフォルダ → スクリプトのフォルダ → ホーム の順
 FBX_NAME = "WineBottle.fbx"
 ATLAS_NAME = "WineBottle_Atlas.png"
@@ -42,43 +43,49 @@ SPOUT_NAME = "Spout"
 MATERIAL_NAME = "WineBottle_Mat"
 
 # 断面 (半径, 高さ) — 高さ 0.30m / 直径 0.07m 基準。下から上へ。
-# 写真のボルドー型: 胴は真っすぐ、なで肩、細い首、上部にキャップシール。
+# 参考画像のシェリー型: 細長い胴、丸く高い肩、長くゆるやかに細くなる首、
+# 上部 2 割ほどを覆う黒いキャップシール。
 PROFILE = [
-    (0.0000, 0.0100),  # 底の上げ底 (中心)
-    (0.0180, 0.0040),
+    (0.0000, 0.0090),  # 底の上げ底 (中心)
+    (0.0170, 0.0035),
     (0.0270, 0.0000),  # 接地リング
     (0.0325, 0.0010),
     (0.0345, 0.0040),
     (0.0350, 0.0090),
-    (0.0350, 0.0500),  # ラベル下端
-    (0.0350, 0.1700),  # ラベル上端
-    (0.0350, 0.1850),  # 肩の始まり
-    (0.0343, 0.1950),
-    (0.0322, 0.2050),
-    (0.0285, 0.2140),
-    (0.0232, 0.2210),
-    (0.0180, 0.2270),
-    (0.0145, 0.2330),
-    (0.0128, 0.2400),
-    (0.0125, 0.2440),  # ガラスの首 (キャップシールの下端の内側)
-    (0.0132, 0.2440),  # キャップシール下端 (わずかな段差)
-    (0.0131, 0.2850),
-    (0.0141, 0.2880),  # 口の膨らみ (シールの上から)
-    (0.0143, 0.2960),
-    (0.0137, 0.2994),
-    (0.0123, 0.3000),
+    (0.0350, 0.0750),  # ラベル下端 (下辺中央の出っ張りの下)
+    (0.0350, 0.1430),  # ラベル上端
+    (0.0348, 0.1530),
+    (0.0340, 0.1650),  # 肩
+    (0.0326, 0.1755),
+    (0.0305, 0.1830),
+    (0.0282, 0.1875),
+    (0.0256, 0.1910),
+    (0.0229, 0.1945),
+    (0.0202, 0.1985),
+    (0.0180, 0.2030),
+    (0.0164, 0.2095),  # 首
+    (0.0153, 0.2200),
+    (0.0146, 0.2320),
+    (0.0143, 0.2410),  # ガラスの首 (キャップシール下端の内側)
+    (0.0149, 0.2410),  # キャップシール下端 (わずかな段差)
+    (0.0141, 0.2620),
+    (0.0135, 0.2850),
+    (0.0133, 0.2960),
+    (0.0128, 0.2993),
+    (0.0120, 0.3000),
     (0.0000, 0.3000),  # 天面の中心 (注ぎ口)
 ]
-LABEL_Z = (0.0500, 0.1700)
-CAPSULE_Z = 0.2440
+LABEL_Z = (0.0750, 0.1430)
+LABEL_FRACTION = 0.35  # ラベルが覆う円周の割合 (正面中央)
+CAPSULE_Z = 0.2410
 REF_HEIGHT, REF_RADIUS = 0.30, 0.035
 
 # アトラスのレイアウト (make_label_texture.py と一致させる)
-UV_LABEL = (0.0, 0.0, 1.0, 0.50)       # u0, v0, u1, v1
-UV_CAPSULE = (0.0, 0.52, 1.0, 0.72)
-UV_GLASS = (0.0, 0.76, 0.70, 1.0)
-UV_CAP_TOP = (0.74, 0.76, 0.98, 1.0)
-UV_PAD = 0.004
+UV_LABEL = (0.0, 0.0, 1.0, 0.62)       # u0, v0, u1, v1
+UV_CAPSULE = (0.0, 0.64, 1.0, 0.84)
+UV_GLASS = (0.0, 0.86, 0.70, 1.0)
+UV_CAP_TOP = (0.74, 0.86, 0.88, 1.0)
+UV_PAD = 0.003
 
 
 # ---------------------------------------------------------------- パス
@@ -119,27 +126,24 @@ def find_atlas():
 
 
 # ---------------------------------------------------------------- テクスチャ
-def fallback_atlas(size=512):
+def fallback_atlas(size=256):
     """アトラス画像が無いとき用の文字なし簡易テクスチャ。"""
     img = bpy.data.images.new(ATLAS_NAME, size, size, alpha=False)
-    glass = (0.157, 0.047, 0.071)
-    paper = (0.94, 0.91, 0.85)
-    red = (0.58, 0.08, 0.125)
-    gold = (0.79, 0.64, 0.32)
+    glass = (0.06, 0.008, 0.005)
+    paper = (0.87, 0.73, 0.69)
+    black = (0.012, 0.011, 0.010)
     px = [0.0] * (size * size * 4)
     for y in range(size):
         v = (y + 0.5) / size
         for x in range(size):
             u = (x + 0.5) / size
             c = glass
-            if v < 0.5:
-                if 0.275 < u < 0.725 and 0.01 < v < 0.49:
-                    c = paper if v > 0.08 else (0.11, 0.09, 0.09)
-            elif 0.52 <= v < 0.72:
-                c = gold if (v > 0.695 or v < 0.53) else red
-            elif v >= 0.76 and u >= 0.72:
-                du, dv = (u - 0.86) / 0.12, (v - 0.88) / 0.12
-                c = red if du * du + dv * dv < 0.74 else gold
+            if v < 0.62:
+                c = paper if (v > 0.10 or 0.3 < u < 0.7) else glass
+            elif 0.64 <= v < 0.84:
+                c = black
+            elif v >= 0.86 and u >= 0.72:
+                c = black
             i = (y * size + x) * 4
             px[i:i + 4] = (*c, 1.0)
     img.pixels = px
@@ -175,7 +179,7 @@ def make_material(img):
     tex.image = img
     tex.location = (-400, 200)
     nt.links.new(tex.outputs["Color"], bsdf.inputs["Base Color"])
-    bsdf.inputs["Roughness"].default_value = 0.25
+    bsdf.inputs["Roughness"].default_value = 0.22
     if "Specular IOR Level" in bsdf.inputs:
         bsdf.inputs["Specular IOR Level"].default_value = 0.6
     return mat
@@ -200,16 +204,19 @@ def build_mesh():
     n = SEGMENTS
     eps = 1e-6
 
-    # 断面に沿った長さ (ガラスとキャップシールの v 座標に使う)
+    # ラベルの列 (正面 j = n/2 を中心に、頂点の列でちょうど区切る)
+    half = max(1, round(n * LABEL_FRACTION / 2))
+    lab_j0, lab_j1 = n // 2 - half, n // 2 + half
+
+    # キャップシールの v は断面に沿った長さで割り当てる
     arc = [0.0]
     for (r0, z0), (r1, z1) in zip(prof, prof[1:]):
         arc.append(arc[-1] + math.hypot(r1 - r0, z1 - z0))
     cap_start = next(i for i, (r, z) in enumerate(prof) if z >= cap_z - eps and r > prof[i - 1][0])
-    glass_len = arc[cap_start - 1]
     cap_len = arc[-2] - arc[cap_start - 1]
 
     def angle(j):
-        # u=0 (継ぎ目) を背面 +Y、u=0.5 を正面 -Y にする
+        # j=0 (継ぎ目) を背面 +Y、j=n/2 を正面 -Y にする
         return math.pi / 2 + 2 * math.pi * j / n
 
     bm = bmesh.new()
@@ -222,41 +229,39 @@ def build_mesh():
         else:
             rings.append([bm.verts.new((r * math.cos(angle(j)), r * math.sin(angle(j)), z)) for j in range(n)])
 
-    def region(i):
+    def region(i, j):
         z0, z1 = prof[i][1], prof[i + 1][1]
-        if z0 >= label_z[0] - eps and z1 <= label_z[1] + eps:
-            return "label"
         if i + 1 >= cap_start:
             return "capsule"
+        if z0 >= label_z[0] - eps and z1 <= label_z[1] + eps and lab_j0 <= j < lab_j1:
+            return "label"
         return "glass"
 
+    def glass_uv(z, s):
+        # ガラスは高さのグラデーション (底 → キャップ下端)
+        return map_rect(UV_GLASS, s, min(1.0, max(0.0, z / cap_z)))
+
     def ring_uv(i, j, reg):
-        s = j / n
         if reg == "label":
             t = (prof[i][1] - label_z[0]) / (label_z[1] - label_z[0])
-            return map_rect(UV_LABEL, s, t)
+            return map_rect(UV_LABEL, (j - lab_j0) / (lab_j1 - lab_j0), t)
         if reg == "capsule":
             t = (arc[i] - arc[cap_start - 1]) / cap_len
-            return map_rect(UV_CAPSULE, s, t)
-        return map_rect(UV_GLASS, s, arc[i] / glass_len)
+            return map_rect(UV_CAPSULE, j / n, t)
+        return glass_uv(prof[i][1], j / n)
 
     def top_uv(v):
-        # 天面は真上から見た平面投影 (正面 -Y が画像の下)
+        # 天面は真上から見た平面投影
         r = prof[-2][0]
         return map_rect(UV_CAP_TOP, 0.5 + v.co.x / r * 0.5, 0.5 + v.co.y / r * 0.5)
 
-    def bottom_uv(v):
-        r = prof[2][0]
-        return map_rect(UV_GLASS, 0.5 + v.co.x / r * 0.5, 0.5 + v.co.y / r * 0.5)
-
     for i in range(len(prof) - 1):
         a, b = rings[i], rings[i + 1]
-        reg = region(i)
         if len(a) == 1:  # 底の中心 → 扇形
             for j in range(n):
                 f = bm.faces.new((a[0], b[(j + 1) % n], b[j]))
                 for loop in f.loops:
-                    loop[uv_layer].uv = bottom_uv(loop.vert)
+                    loop[uv_layer].uv = glass_uv(loop.vert.co.z, 0.5)
         elif len(b) == 1:  # 天面の中心 → 扇形
             for j in range(n):
                 f = bm.faces.new((a[j], a[(j + 1) % n], b[0]))
@@ -265,6 +270,7 @@ def build_mesh():
         else:
             for j in range(n):
                 k = (j + 1) % n
+                reg = region(i, j)
                 f = bm.faces.new((a[j], a[k], b[k], b[j]))
                 # UV はループごとに設定 (継ぎ目で u=1.0 になるよう j+1 を使う)
                 uvs = (ring_uv(i, j, reg), ring_uv(i, j + 1, reg),

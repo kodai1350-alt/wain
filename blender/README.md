@@ -1,6 +1,6 @@
 # ワインボトル (VRChat 用)
 
-写真のボルドー型ボトルを参考にした、アバターに持たせるワインボトルです。
+参考画像のシェリー型ボトル「PEARCHAN OLOROSO」をもとにした、アバターに持たせるワインボトルです。
 
 ![preview](../export/preview.png)
 
@@ -8,23 +8,25 @@
 
 | 項目 | 内容 |
 | --- | --- |
+| 形 | シェリー型。細長い胴、丸く高い肩、長くゆるやかに細くなる首、上部を覆う黒いキャップシール (溝 2 本) |
+| ラベル | 淡いピンク。PEARCHAN / OLOROSO / JEREZ – XÉRÈS – SHERRY、下辺中央の出っ張りに年号 **2007** |
+| ガラス | オロロソの赤褐色 (底ほど暗い) |
 | 向き | 立てた状態。Unity で Y が上、注ぎ口が真上 |
 | 大きさ | 高さ 30cm / 太さ (直径) 7cm。原点は底面の中心 |
 | 注ぎ口 | 口の真上の中心に空のオブジェクト `Spout` (WineBottle の子) |
 | 中のワイン | なし (外側の瓶だけ) |
-| ポリゴン | 1,760 三角形 |
-| マテリアル | 1 個 (`WineBottle_Mat`、テクスチャ 1 枚 `WineBottle_Atlas.png`) |
+| ポリゴン | 2,080 三角形 |
+| マテリアル | 1 個 (`WineBottle_Mat`、テクスチャ 1 枚 `WineBottle_Atlas.png` 1024×1024) |
 | 構成 | 瓶・キャップシール・ラベルが 1 つのメッシュ `WineBottle` |
 | ラベルの正面 | オブジェクトの前方 (Unity の +Z 方向) |
-
-ラベルの銘柄「CHÂTEAU WAIN」は架空のものです (実在の銘柄は使っていません)。
+| 動作確認 | Blender 5.1.2 |
 
 ## ファイル
 
 - `make_wine_bottle.py` … Blender でボトルを作って FBX に書き出すスクリプト
 - `make_label_texture.py` … ラベルなどのテクスチャ `WineBottle_Atlas.png` を作るスクリプト (Pillow を使用)
 - `WineBottle_Atlas.png` … 生成済みのテクスチャ
-- `../export/WineBottle.fbx` … このスクリプトで書き出し済みの FBX (Blender 5.0.1 で作成)
+- `../export/WineBottle.fbx` … このスクリプトで書き出し済みの FBX (Blender 5.1.2 で作成)
 
 ## Blender での使い方
 
@@ -45,6 +47,7 @@ blender -b -P make_wine_bottle.py -- --out <出力フォルダ>
 ```
 
 大きさや丸さを変えたいときは、スクリプト上部の `HEIGHT` / `DIAMETER` / `SEGMENTS` を変更してください。
+ラベルの文字や年号を変えたいときは `make_label_texture.py` を編集して実行し直してください。
 
 ## Unity に入れるとき
 
