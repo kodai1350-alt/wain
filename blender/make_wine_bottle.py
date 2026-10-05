@@ -7,14 +7,15 @@ Blender スクリプト (Blender 5.1 で動作確認)。
   B) コマンドライン:  blender -b -P make_wine_bottle.py -- --out <出力フォルダ>
 
 作成されるもの:
-  - WineBottle : ボトル本体 (瓶 + キャップシール + ラベルを 1 メッシュ / 1 マテリアル)
+  - WineBottle : ボトル本体 (瓶 + キャップシール + ラベルを 1 メッシュ / 2 マテリアル)
   - Spout      : 注ぎ口の目印 (空のオブジェクト)。WineBottle の子で、口の真上の中心
   - WineBottle.fbx と WineBottle_Atlas.png を出力フォルダに書き出し
 
 仕様:
   - 立てた状態。Unity では Y が上、注ぎ口が真上 (FBX 書き出し時に Z-up → Y-up 変換)
   - 高さ 30cm / 太さ (直径) 7cm。原点は底面の中心
-  - 約 2,100 三角形、マテリアル 1 個 (テクスチャアトラス 1 枚)
+  - 約 2,900 三角形、マテリアル 2 個 (ツヤのあるガラス / しっとりしたラベル・キャップ)。
+    テクスチャはアトラス 1 枚を 2 つのマテリアルで共有
   - 中の液体なし (外側の瓶だけ)
   - ラベルの正面は Blender の -Y 側 (正面ビューで見える側)
 
@@ -34,21 +35,24 @@ import bmesh
 # ---------------------------------------------------------------- 設定
 HEIGHT = 0.30          # 高さ (m)
 DIAMETER = 0.07        # 胴の直径 (m)
-SEGMENTS = 40          # 円周の分割数 (三角形数はおよそ 52 x SEGMENTS)
+SEGMENTS = 48          # 円周の分割数 (三角形数はおよそ 60 x SEGMENTS)
 OUTPUT_DIR = ""        # 空なら: .blend のフォルダ → スクリプトのフォルダ → ホーム の順
 FBX_NAME = "WineBottle.fbx"
 ATLAS_NAME = "WineBottle_Atlas.png"
 OBJECT_NAME = "WineBottle"
 SPOUT_NAME = "Spout"
-MATERIAL_NAME = "WineBottle_Mat"
+GLASS_MATERIAL = "WineBottle_Glass"   # ガラス (ツヤあり)
+LABEL_MATERIAL = "WineBottle_Label"   # ラベル・ネックラベル・キャップ (ツヤ控えめ)
 
 # 断面 (半径, 高さ) — 高さ 0.30m / 直径 0.07m 基準。下から上へ。
 # 参考画像のシェリー型: 細長い胴、丸く高い肩、長くゆるやかに細くなる首、
-# 上部 2 割ほどを覆う黒いキャップシール。
+# 上部 2 割ほどを覆う黒いキャップシール、その下に金のネックラベル。
 PROFILE = [
-    (0.0000, 0.0090),  # 底の上げ底 (中心)
-    (0.0170, 0.0035),
-    (0.0270, 0.0000),  # 接地リング
+    (0.0000, 0.0180),  # 底の上げ底 (中心) — 深めの上げ底
+    (0.0100, 0.0150),
+    (0.0185, 0.0070),
+    (0.0260, 0.0005),
+    (0.0275, 0.0000),  # 接地リング
     (0.0325, 0.0010),
     (0.0345, 0.0040),
     (0.0350, 0.0090),
@@ -63,9 +67,10 @@ PROFILE = [
     (0.0229, 0.1945),
     (0.0202, 0.1985),
     (0.0180, 0.2030),
-    (0.0164, 0.2095),  # 首
-    (0.0153, 0.2200),
-    (0.0146, 0.2320),
+    (0.0166, 0.2085),  # 首
+    (0.0159, 0.2140),  # ネックラベル下端
+    (0.0151, 0.2250),
+    (0.0145, 0.2360),  # ネックラベル上端
     (0.0143, 0.2410),  # ガラスの首 (キャップシール下端の内側)
     (0.0149, 0.2410),  # キャップシール下端 (わずかな段差)
     (0.0141, 0.2620),
@@ -77,15 +82,17 @@ PROFILE = [
 ]
 LABEL_Z = (0.0750, 0.1430)
 LABEL_FRACTION = 0.35  # ラベルが覆う円周の割合 (正面中央)
+NECK_Z = (0.2140, 0.2360)
 CAPSULE_Z = 0.2410
 REF_HEIGHT, REF_RADIUS = 0.30, 0.035
 
 # アトラスのレイアウト (make_label_texture.py と一致させる)
-UV_LABEL = (0.0, 0.0, 1.0, 0.62)       # u0, v0, u1, v1
-UV_CAPSULE = (0.0, 0.64, 1.0, 0.84)
-UV_GLASS = (0.0, 0.86, 0.70, 1.0)
-UV_CAP_TOP = (0.74, 0.86, 0.88, 1.0)
-UV_PAD = 0.003
+UV_LABEL = (0.0, 0.0, 1.0, 0.56)       # u0, v0, u1, v1
+UV_NECK = (0.0, 0.58, 1.0, 0.68)
+UV_CAPSULE = (0.0, 0.70, 1.0, 0.86)
+UV_GLASS = (0.0, 0.88, 0.70, 1.0)
+UV_CAP_TOP = (0.74, 0.88, 0.86, 1.0)
+UV_PAD = 0.002
 
 
 # ---------------------------------------------------------------- パス
@@ -138,11 +145,11 @@ def fallback_atlas(size=256):
         for x in range(size):
             u = (x + 0.5) / size
             c = glass
-            if v < 0.62:
-                c = paper if (v > 0.10 or 0.3 < u < 0.7) else glass
-            elif 0.64 <= v < 0.84:
+            if v < 0.56:
+                c = paper if (v > 0.06 or 0.3 < u < 0.7) else glass
+            elif 0.58 <= v < 0.86:
                 c = black
-            elif v >= 0.86 and u >= 0.72:
+            elif v >= 0.88 and u >= 0.72:
                 c = black
             i = (y * size + x) * 4
             px[i:i + 4] = (*c, 1.0)
@@ -166,11 +173,11 @@ def load_atlas():
     return img
 
 
-def make_material(img):
-    old = bpy.data.materials.get(MATERIAL_NAME)
+def make_material(name, img, roughness, specular):
+    old = bpy.data.materials.get(name)
     if old:
         bpy.data.materials.remove(old)
-    mat = bpy.data.materials.new(MATERIAL_NAME)
+    mat = bpy.data.materials.new(name)
     if bpy.app.version < (5, 0, 0):
         mat.use_nodes = True
     nt = mat.node_tree
@@ -179,9 +186,9 @@ def make_material(img):
     tex.image = img
     tex.location = (-400, 200)
     nt.links.new(tex.outputs["Color"], bsdf.inputs["Base Color"])
-    bsdf.inputs["Roughness"].default_value = 0.22
+    bsdf.inputs["Roughness"].default_value = roughness
     if "Specular IOR Level" in bsdf.inputs:
-        bsdf.inputs["Specular IOR Level"].default_value = 0.6
+        bsdf.inputs["Specular IOR Level"].default_value = specular
     return mat
 
 
@@ -208,12 +215,9 @@ def build_mesh():
     half = max(1, round(n * LABEL_FRACTION / 2))
     lab_j0, lab_j1 = n // 2 - half, n // 2 + half
 
-    # キャップシールの v は断面に沿った長さで割り当てる
-    arc = [0.0]
-    for (r0, z0), (r1, z1) in zip(prof, prof[1:]):
-        arc.append(arc[-1] + math.hypot(r1 - r0, z1 - z0))
+    neck_z = (NECK_Z[0] * sz, NECK_Z[1] * sz)
+    top_z = prof[-1][1]
     cap_start = next(i for i, (r, z) in enumerate(prof) if z >= cap_z - eps and r > prof[i - 1][0])
-    cap_len = arc[-2] - arc[cap_start - 1]
 
     def angle(j):
         # j=0 (継ぎ目) を背面 +Y、j=n/2 を正面 -Y にする
@@ -233,6 +237,8 @@ def build_mesh():
         z0, z1 = prof[i][1], prof[i + 1][1]
         if i + 1 >= cap_start:
             return "capsule"
+        if z0 >= neck_z[0] - eps and z1 <= neck_z[1] + eps:
+            return "neck"
         if z0 >= label_z[0] - eps and z1 <= label_z[1] + eps and lab_j0 <= j < lab_j1:
             return "label"
         return "glass"
@@ -245,9 +251,10 @@ def build_mesh():
         if reg == "label":
             t = (prof[i][1] - label_z[0]) / (label_z[1] - label_z[0])
             return map_rect(UV_LABEL, (j - lab_j0) / (lab_j1 - lab_j0), t)
-        if reg == "capsule":
-            t = (arc[i] - arc[cap_start - 1]) / cap_len
-            return map_rect(UV_CAPSULE, j / n, t)
+        if reg == "capsule":  # v は高さに比例 (make_label_texture.py と同じ)
+            return map_rect(UV_CAPSULE, j / n, (prof[i][1] - cap_z) / (top_z - cap_z))
+        if reg == "neck":
+            return map_rect(UV_NECK, j / n, (prof[i][1] - neck_z[0]) / (neck_z[1] - neck_z[0]))
         return glass_uv(prof[i][1], j / n)
 
     def top_uv(v):
@@ -260,11 +267,13 @@ def build_mesh():
         if len(a) == 1:  # 底の中心 → 扇形
             for j in range(n):
                 f = bm.faces.new((a[0], b[(j + 1) % n], b[j]))
+                f.material_index = 0
                 for loop in f.loops:
                     loop[uv_layer].uv = glass_uv(loop.vert.co.z, 0.5)
         elif len(b) == 1:  # 天面の中心 → 扇形
             for j in range(n):
                 f = bm.faces.new((a[j], a[(j + 1) % n], b[0]))
+                f.material_index = 1
                 for loop in f.loops:
                     loop[uv_layer].uv = top_uv(loop.vert)
         else:
@@ -272,6 +281,7 @@ def build_mesh():
                 k = (j + 1) % n
                 reg = region(i, j)
                 f = bm.faces.new((a[j], a[k], b[k], b[j]))
+                f.material_index = 0 if reg == "glass" else 1
                 # UV はループごとに設定 (継ぎ目で u=1.0 になるよう j+1 を使う)
                 uvs = (ring_uv(i, j, reg), ring_uv(i, j + 1, reg),
                        ring_uv(i + 1, j + 1, reg), ring_uv(i + 1, j, reg))
@@ -304,6 +314,10 @@ def remove_old():
     me = bpy.data.meshes.get(OBJECT_NAME)
     if me and me.users == 0:
         bpy.data.meshes.remove(me)
+    # 以前のバージョンの 1 マテリアル版が残っていれば片付ける
+    legacy = bpy.data.materials.get("WineBottle_Mat")
+    if legacy and legacy.users == 0:
+        bpy.data.materials.remove(legacy)
 
 
 def build_scene():
@@ -313,7 +327,9 @@ def build_scene():
     coll = bpy.context.scene.collection
 
     me = build_mesh()
-    me.materials.append(make_material(load_atlas()))
+    img = load_atlas()
+    me.materials.append(make_material(GLASS_MATERIAL, img, roughness=0.05, specular=0.8))
+    me.materials.append(make_material(LABEL_MATERIAL, img, roughness=0.55, specular=0.3))
     bottle = bpy.data.objects.new(OBJECT_NAME, me)
     coll.objects.link(bottle)
 
