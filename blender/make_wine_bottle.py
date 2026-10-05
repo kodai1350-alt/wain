@@ -1,6 +1,6 @@
 """
 VRChat 用ワインボトル (シェリー型 / PEARCHAN OLOROSO) を作成して FBX で書き出す
-Blender スクリプト (Blender 5.1 で動作確認)。
+Blender スクリプト (Blender 5.1 で動作確認)。ラベルと質感は参考画像に合わせています。
 
 使い方 (どちらでも可):
   A) Blender の Scripting タブでこのファイルを開いて「スクリプト実行」(Alt+P)
@@ -14,7 +14,7 @@ Blender スクリプト (Blender 5.1 で動作確認)。
 仕様:
   - 立てた状態。Unity では Y が上、注ぎ口が真上 (FBX 書き出し時に Z-up → Y-up 変換)
   - 高さ 30cm / 太さ (直径) 7cm。原点は底面の中心
-  - 約 2,900 三角形、マテリアル 2 個 (ツヤのあるガラス / しっとりしたラベル・キャップ)。
+  - 約 2,800 三角形、マテリアル 2 個 (ツヤのあるガラス / つや消しのラベル・キャップ)。
     テクスチャはアトラス 1 枚を 2 つのマテリアルで共有
   - 中の液体なし (外側の瓶だけ)
   - ラベルの正面は Blender の -Y 側 (正面ビューで見える側)
@@ -42,11 +42,11 @@ ATLAS_NAME = "WineBottle_Atlas.png"
 OBJECT_NAME = "WineBottle"
 SPOUT_NAME = "Spout"
 GLASS_MATERIAL = "WineBottle_Glass"   # ガラス (ツヤあり)
-LABEL_MATERIAL = "WineBottle_Label"   # ラベル・ネックラベル・キャップ (ツヤ控えめ)
+LABEL_MATERIAL = "WineBottle_Label"   # ラベル・キャップ (ツヤ控えめ)
 
 # 断面 (半径, 高さ) — 高さ 0.30m / 直径 0.07m 基準。下から上へ。
 # 参考画像のシェリー型: 細長い胴、丸く高い肩、長くゆるやかに細くなる首、
-# 上部 2 割ほどを覆う黒いキャップシール、その下に金のネックラベル。
+# 上部 2 割ほどを覆う黒いキャップシール。
 PROFILE = [
     (0.0000, 0.0180),  # 底の上げ底 (中心) — 深めの上げ底
     (0.0100, 0.0150),
@@ -68,9 +68,9 @@ PROFILE = [
     (0.0202, 0.1985),
     (0.0180, 0.2030),
     (0.0166, 0.2085),  # 首
-    (0.0159, 0.2140),  # ネックラベル下端
+    (0.0159, 0.2140),
     (0.0151, 0.2250),
-    (0.0145, 0.2360),  # ネックラベル上端
+    (0.0145, 0.2360),
     (0.0143, 0.2410),  # ガラスの首 (キャップシール下端の内側)
     (0.0149, 0.2410),  # キャップシール下端 (わずかな段差)
     (0.0141, 0.2620),
@@ -82,14 +82,12 @@ PROFILE = [
 ]
 LABEL_Z = (0.0750, 0.1430)
 LABEL_FRACTION = 0.35  # ラベルが覆う円周の割合 (正面中央)
-NECK_Z = (0.2140, 0.2360)
 CAPSULE_Z = 0.2410
 REF_HEIGHT, REF_RADIUS = 0.30, 0.035
 
 # アトラスのレイアウト (make_label_texture.py と一致させる)
-UV_LABEL = (0.0, 0.0, 1.0, 0.56)       # u0, v0, u1, v1
-UV_NECK = (0.0, 0.58, 1.0, 0.68)
-UV_CAPSULE = (0.0, 0.70, 1.0, 0.86)
+UV_LABEL = (0.0, 0.0, 1.0, 0.66)       # u0, v0, u1, v1
+UV_CAPSULE = (0.0, 0.68, 1.0, 0.86)
 UV_GLASS = (0.0, 0.88, 0.70, 1.0)
 UV_CAP_TOP = (0.74, 0.88, 0.86, 1.0)
 UV_PAD = 0.002
@@ -145,9 +143,9 @@ def fallback_atlas(size=256):
         for x in range(size):
             u = (x + 0.5) / size
             c = glass
-            if v < 0.56:
+            if v < 0.66:
                 c = paper if (v > 0.06 or 0.3 < u < 0.7) else glass
-            elif 0.58 <= v < 0.86:
+            elif 0.68 <= v < 0.86:
                 c = black
             elif v >= 0.88 and u >= 0.72:
                 c = black
@@ -215,7 +213,6 @@ def build_mesh():
     half = max(1, round(n * LABEL_FRACTION / 2))
     lab_j0, lab_j1 = n // 2 - half, n // 2 + half
 
-    neck_z = (NECK_Z[0] * sz, NECK_Z[1] * sz)
     top_z = prof[-1][1]
     cap_start = next(i for i, (r, z) in enumerate(prof) if z >= cap_z - eps and r > prof[i - 1][0])
 
@@ -237,8 +234,6 @@ def build_mesh():
         z0, z1 = prof[i][1], prof[i + 1][1]
         if i + 1 >= cap_start:
             return "capsule"
-        if z0 >= neck_z[0] - eps and z1 <= neck_z[1] + eps:
-            return "neck"
         if z0 >= label_z[0] - eps and z1 <= label_z[1] + eps and lab_j0 <= j < lab_j1:
             return "label"
         return "glass"
@@ -253,8 +248,6 @@ def build_mesh():
             return map_rect(UV_LABEL, (j - lab_j0) / (lab_j1 - lab_j0), t)
         if reg == "capsule":  # v は高さに比例 (make_label_texture.py と同じ)
             return map_rect(UV_CAPSULE, j / n, (prof[i][1] - cap_z) / (top_z - cap_z))
-        if reg == "neck":
-            return map_rect(UV_NECK, j / n, (prof[i][1] - neck_z[0]) / (neck_z[1] - neck_z[0]))
         return glass_uv(prof[i][1], j / n)
 
     def top_uv(v):
@@ -328,8 +321,9 @@ def build_scene():
 
     me = build_mesh()
     img = load_atlas()
-    me.materials.append(make_material(GLASS_MATERIAL, img, roughness=0.05, specular=0.8))
-    me.materials.append(make_material(LABEL_MATERIAL, img, roughness=0.55, specular=0.3))
+    # 参考画像のガラスはハイライトが柔らかめ、ラベルとキャップはつや消し
+    me.materials.append(make_material(GLASS_MATERIAL, img, roughness=0.2, specular=0.6))
+    me.materials.append(make_material(LABEL_MATERIAL, img, roughness=0.65, specular=0.25))
     bottle = bpy.data.objects.new(OBJECT_NAME, me)
     coll.objects.link(bottle)
 
