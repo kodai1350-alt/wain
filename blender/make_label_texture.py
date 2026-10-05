@@ -1,7 +1,7 @@
 """
-ワインボトル (シェリー型 / PEARCHAN OLOROSO) 用テクスチャアトラス
+ワインボトル (シェリー型 / WAIN OLOROSO 2007) 用テクスチャアトラス
 WineBottle_Atlas.png を生成するスクリプト。
-ラベルのデザインと色は参考画像 (PEARCHAN OLOROSO) に合わせています。
+ボトルの形と質感は参考画像に合わせ、ラベルはオリジナル (架空の銘柄 WAIN、2007 年)。
 
 Blender ではなく通常の Python + Pillow で実行します:
     pip install pillow
@@ -27,13 +27,13 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(HERE, "WineBottle_Atlas.png")
 SIZE = 2048
 YEAR = "2007"
+BRAND = "WAIN"                  # 架空の銘柄
 
 # make_wine_bottle.py と同じ寸法 (高さ 0.30m / 直径 0.07m 基準)
 LABEL_Z = (0.0750, 0.1430)      # ラベル帯の下端 (出っ張りの下) / 上端
-LABEL_MAIN_BOTTOM = 0.0815      # 出っ張り以外のラベル下辺
 LABEL_FRACTION = 0.35           # ラベルが覆う円周の割合
 CAPSULE_Z = (0.2410, 0.3000)
-CAPSULE_RADIUS = 0.0138
+CAPSULE_RADIUS = 0.0155
 RADIUS = 0.035
 
 UV_LABEL = (0.0, 0.0, 1.0, 0.66)
@@ -41,11 +41,11 @@ UV_CAPSULE = (0.0, 0.68, 1.0, 0.86)
 UV_GLASS = (0.0, 0.88, 0.70, 1.0)
 UV_CAP_TOP = (0.74, 0.88, 0.86, 1.0)
 
-# 色 (参考画像から)
-PAPER = (240, 222, 216)          # 淡いピンクの紙
-INK = (66, 58, 58)               # PEARCHAN の濃いグレー
-INK_SOFT = (122, 112, 110)       # OLOROSO などの薄いグレー
-RED_INK = (192, 66, 58)          # JEREZ - XÉRÈS - SHERRY
+# 色
+PAPER = (242, 233, 216)          # クリーム色の紙
+INK = (44, 36, 34)               # 銘柄・年号
+SEPIA = (112, 84, 62)            # 樽の線画
+DEEP_RED = (128, 30, 38)         # 枠・OLOROSO・下の帯 (シェリーの赤)
 CAPSULE = (30, 28, 26)
 CAPSULE_DARK = (12, 11, 10)
 CAPSULE_HI = (60, 57, 54)
@@ -146,21 +146,48 @@ def ink_texture(canvas, mask, color, strength=0.18):
 
 
 # ---------------------------------------------------------------- ラベル
-def label_shape(W, H, main_bottom):
-    """長方形 + 下辺中央の出っ張り (丸い肩でつながる)。"""
-    tab_l, tab_r = W * 0.27, W * 0.75
-    curve = W * 0.07
-    mb, bot = main_bottom, H - 1
-    pts = [(0, 0), (W - 1, 0), (W - 1, mb)]
-    steps = 24
-    for i in range(steps + 1):
-        t = i / steps
-        pts.append((tab_r + curve * (1 - t), mb + (bot - mb) * (0.5 - 0.5 * math.cos(math.pi * t))))
-    for i in range(steps + 1):
-        t = i / steps
-        pts.append((tab_l - curve * t, bot - (bot - mb) * (0.5 - 0.5 * math.cos(math.pi * t))))
-    pts.append((0, mb))
+def notched_rect(W, H, inset=0, corner=0.045):
+    """四隅が凹んだ長方形 (時計回りの点列)。"""
+    r = W * corner
+    x0, y0, x1, y1 = inset, inset, W - 1 - inset, H - 1 - inset
+    steps = 14
+    pts = []
+
+    def arc(cx, cy, a_from, a_to):
+        for i in range(steps + 1):
+            a = math.radians(a_from + (a_to - a_from) * i / steps)
+            pts.append((cx + r * math.cos(a), cy + r * math.sin(a)))
+
+    # 画像座標 (y 下向き)。左上の角は (x0, y0) を中心に 90°→0° で内側を回る
+    arc(x0, y0, 90, 0)          # 左辺上端 → 上辺左端
+    arc(x1, y0, 180, 90)        # 上辺右端 → 右辺上端
+    arc(x1, y1, 270, 180)       # 右辺下端 → 下辺右端
+    arc(x0, y1, 0, -90)         # 下辺左端 → 左辺下端
     return pts
+
+
+def barrels(md, cx, base_y, s, width):
+    """ソレラ (積み重ねた熟成樽) の線画。2 段: 下 3 樽、上 2 樽。"""
+    r = s * 0.5
+    rows = [(-1, 0, 1), (-0.5, 0.5)]
+    for k, row in enumerate(rows):
+        cy = base_y - r - k * (r * 1.72)
+        for i in row:
+            x = cx + i * r * 2.08
+            md.ellipse([x - r, cy - r, x + r, cy + r], outline=255, width=width)
+            md.ellipse([x - r * 0.80, cy - r * 0.80, x + r * 0.80, cy + r * 0.80], outline=255, width=max(1, width // 2))
+            # 鏡板の板目 (縦線) と栓
+            for t in (-0.45, 0.0, 0.45):
+                h = math.sqrt(max(0.0, 0.64 - t * t)) * r
+                md.line([(x + t * r, cy - h), (x + t * r, cy + h)], fill=255, width=max(1, width // 2))
+            md.ellipse([x - r * 0.08, cy + r * 0.42, x + r * 0.08, cy + r * 0.58], fill=255)
+    # 床の線
+    md.line([(cx - r * 3.6, base_y), (cx + r * 3.6, base_y)], fill=255, width=width)
+
+
+def rule(md, cx, y, half, thick, gap):
+    md.line([(cx - half, y), (cx - gap, y)], fill=255, width=thick)
+    md.line([(cx + gap, y), (cx + half, y)], fill=255, width=thick)
 
 
 def label_canvas():
@@ -168,45 +195,61 @@ def label_canvas():
     label_h = LABEL_Z[1] - LABEL_Z[0]                  # 約 0.068m
     W = 2600
     H = round(W * label_h / label_w)
-    main_bottom = round(H * (LABEL_Z[1] - LABEL_MAIN_BOTTOM) / label_h)
+    cx = W / 2
 
     shape = Image.new("L", (W, H), 0)
-    ImageDraw.Draw(shape).polygon(label_shape(W, H, main_bottom), fill=255)
+    ImageDraw.Draw(shape).polygon(notched_rect(W, H), fill=255)
     canvas = paper((W, H))
-    # ふちをごくわずかに暗く (紙の厚み感)
     edge = shape.filter(ImageFilter.GaussianBlur(18))
     canvas = ImageChops.multiply(canvas, Image.merge("RGB", [edge.point(lambda a: 220 + a * 35 // 255)] * 3))
 
-    # 参考画像どおり左寄せ (左端から約 8%)
-    x0 = W * 0.08
-
-    # PEARCHAN: コントラストの強い太いセリフ体、ラベル幅の約 85%
-    sp = 0.02
-    size = fit_size("PEARCHAN", PLAYFAIR, 800, W * 0.85, sp, 700)
+    # 枠: 外側に細い赤線、内側にさらに細い線 (どちらも角の切り欠きに沿う)
     m = Image.new("L", (W, H), 0)
-    draw_text(ImageDraw.Draw(m), x0, H * 0.205, "PEARCHAN", font(PLAYFAIR, size, 800), 255, spacing=size * sp)
-    ink_texture(canvas, m, INK)
+    md = ImageDraw.Draw(m)
+    for inset, width in ((40, 7), (60, 2)):
+        pts = notched_rect(W, H, inset)
+        md.line(pts + [pts[0]], fill=255, width=width, joint="curve")
+    ink_texture(canvas, m, DEEP_RED, strength=0.1)
+
+    # 下の赤い帯
+    band_top, band_bot = H * 0.790, H - 1 - 60
+    band = Image.new("L", (W, H), 0)
+    ImageDraw.Draw(band).rectangle([60, band_top, W - 61, band_bot], fill=255)
+    band = ImageChops.multiply(band, shape)
+    canvas.paste(DEEP_RED, (0, 0), band)
 
     d = ImageDraw.Draw(canvas)
-    # OLOROSO: 細めのセリフ、薄いグレー、字間広め
-    draw_text(d, x0 + W * 0.005, H * 0.405, "OLOROSO", font(CORMORANT, H * 0.090, 500), INK_SOFT,
-              spacing=H * 0.012)
-    # 赤い小さな文字 (少し右に下げて配置)
-    draw_text(d, W * 0.17, H * 0.585, "JEREZ – XÉRÈS – SHERRY", font(CORMORANT, H * 0.044, 700),
-              RED_INK, spacing=H * 0.004)
+    draw_text(d, cx, H * 0.080, "SOLERA  ESPECIAL", font(CORMORANT, H * 0.048, 700), DEEP_RED,
+              spacing=H * 0.012, align="center")
 
-    # 中央の小さな年号 (参考画像の小さな印の位置)
-    cx = W * 0.505
-    draw_text(d, cx, H * 0.735, "· " + YEAR + " ·", font(CORMORANT, H * 0.042, 600), INK_SOFT,
-              spacing=H * 0.006, align="center")
+    # ソレラの樽 (セピアの線画)
+    m = Image.new("L", (W, H), 0)
+    barrels(ImageDraw.Draw(m), cx, H * 0.345, H * 0.098, 5)
+    ink_texture(canvas, m, SEPIA, strength=0.12)
 
-    # 下の出っ張り: 3 行 (小さい行 / 太字の蔵元名 / 小さい行)
-    draw_text(d, cx, H * 0.825, "VINO DE JEREZ", font(CORMORANT, H * 0.032, 600), INK_SOFT,
-              spacing=H * 0.008, align="center")
-    draw_text(d, cx, H * 0.872, "BODEGAS PEARCHAN", font(PLAYFAIR, H * 0.040, 700), INK,
-              spacing=H * 0.006, align="center")
-    draw_text(d, cx, H * 0.935, "JEREZ DE LA FRONTERA", font(CORMORANT, H * 0.027, 600), INK_SOFT,
-              spacing=H * 0.004, align="center")
+    # 銘柄
+    m = Image.new("L", (W, H), 0)
+    f = font(PLAYFAIR, H * 0.175, 800)
+    draw_text(ImageDraw.Draw(m), cx, H * 0.345, BRAND, f, 255, spacing=H * 0.020, align="center")
+    ink_texture(canvas, m, INK)
+
+    draw_text(d, cx, H * 0.548, "OLOROSO", font(CORMORANT, H * 0.068, 600), DEEP_RED,
+              spacing=H * 0.030, align="center")
+
+    # 年号 (左右に細い線)
+    m = Image.new("L", (W, H), 0)
+    md = ImageDraw.Draw(m)
+    f = font(PLAYFAIR, H * 0.085, 700)
+    draw_text(md, cx, H * 0.640, YEAR, f, 255, spacing=H * 0.012, align="center")
+    yw = text_width(YEAR, f, H * 0.012)
+    rule(md, cx, H * 0.695, W * 0.36, 3, yw / 2 + W * 0.03)
+    ink_texture(canvas, m, INK, strength=0.1)
+
+    # 赤い帯の中の文字 (クリーム色)
+    draw_text(d, cx, H * 0.815, "JEREZ \u00b7 XÉRÈS \u00b7 SHERRY", font(CORMORANT, H * 0.050, 700), PAPER,
+              spacing=H * 0.010, align="center")
+    draw_text(d, cx, H * 0.885, "BODEGAS " + BRAND + "  \u00b7  JEREZ DE LA FRONTERA", font(CORMORANT, H * 0.030, 600),
+              PAPER, spacing=H * 0.005, align="center")
 
     out = Image.new("RGBA", (W, H))
     out.paste(canvas, (0, 0), shape)
