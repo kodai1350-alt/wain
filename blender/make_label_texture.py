@@ -1,7 +1,7 @@
 """
-ワインボトル (シェリー型 / WAIN OLOROSO 2007) 用テクスチャアトラス
+ワインボトル (シェリー型 / YŪGEN OLOROSO 2007) 用テクスチャアトラス
 WineBottle_Atlas.png を生成するスクリプト。
-ボトルの形と質感は参考画像に合わせ、ラベルはオリジナル (架空の銘柄 WAIN、2007 年)。
+ボトルの形と質感は参考画像に合わせ、ラベルはオリジナル (架空の銘柄 YŪGEN、2007 年)。
 
 Blender ではなく通常の Python + Pillow で実行します:
     pip install pillow
@@ -27,7 +27,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(HERE, "WineBottle_Atlas.png")
 SIZE = 2048
 YEAR = "2007"
-BRAND = "WAIN"                  # 架空の銘柄
+BRAND = "YŪGEN"                 # 架空の銘柄 (幽玄)
 
 # make_wine_bottle.py と同じ寸法 (高さ 0.30m / 直径 0.07m 基準)
 LABEL_Z = (0.0750, 0.1430)      # ラベル帯の下端 (出っ張りの下) / 上端
@@ -43,9 +43,11 @@ UV_CAP_TOP = (0.74, 0.88, 0.86, 1.0)
 
 # 色
 PAPER = (242, 233, 216)          # クリーム色の紙
-INK = (44, 36, 34)               # 銘柄・年号
-SEPIA = (112, 84, 62)            # 樽の線画
-DEEP_RED = (128, 30, 38)         # 枠・OLOROSO・下の帯 (シェリーの赤)
+INK = (44, 36, 34)               # 銘柄
+INK_SOFT = (118, 102, 92)        # 小さな文字・年号
+DEEP_RED = (128, 30, 38)         # 枠・紋章・OLOROSO (シェリーの赤)
+GOLD_STOPS = [(0.0, (240, 210, 134)), (0.38, (202, 152, 64)), (0.55, (142, 98, 32)),
+              (0.75, (192, 142, 60)), (1.0, (228, 190, 108))]
 CAPSULE = (30, 28, 26)
 CAPSULE_DARK = (12, 11, 10)
 CAPSULE_HI = (60, 57, 54)
@@ -145,6 +147,82 @@ def ink_texture(canvas, mask, color, strength=0.18):
     canvas.paste(layer, (0, 0), Image.blend(mask, worn, strength))
 
 
+# ---------------------------------------------------------------- 金箔・紋章
+def foil(canvas, mask, emboss=3):
+    """mask (L) の形に金箔を押したように描く: 影 + ハイライト + 金のグラデーション。"""
+    bbox = mask.getbbox()
+    if not bbox:
+        return
+    w, h = canvas.size
+    shadow = ImageChops.offset(mask, emboss, emboss).filter(ImageFilter.GaussianBlur(emboss * 0.8))
+    canvas.paste((90, 64, 34), (0, 0), shadow.point(lambda a: a * 0.45))
+    k = max(1, emboss // 2)
+    hi = ImageChops.offset(mask, -k, -k)
+    canvas.paste((255, 246, 214), (0, 0), hi.point(lambda a: a * 0.6))
+    grad = Image.new("RGB", (1, h))
+    y0, y1 = bbox[1], bbox[3]
+    for y in range(h):
+        t = min(1.0, max(0.0, (y - y0) / max(1, y1 - y0)))
+        grad.putpixel((0, y), lerp_color(GOLD_STOPS, t))
+    grad = grad.resize((w, h))
+    noise = Image.effect_noise((w, h), 30).filter(ImageFilter.GaussianBlur(1.2))  # 金箔の細かいムラ
+    grad = Image.blend(grad, Image.merge("RGB", (noise, noise, noise)), 0.06)
+    canvas.paste(grad, (0, 0), mask)
+
+
+def laurel(mask, cx, cy, r, side, leaves=7, leaf=(30, 11)):
+    """月桂樹の枝 (片側) を mask に描く。side=-1 で左、1 で右。"""
+    lw, lh = leaf
+    draw = ImageDraw.Draw(mask)
+    # 下 (根元) から上へ円弧に沿って枝を伸ばし、葉を枝の両側に対で付ける
+    angles = [-95 + i * (100 / max(1, leaves - 1)) for i in range(leaves)]
+    pts = []
+
+    def put_leaf(x, y, rot, w2, h2):
+        img = Image.new("L", (w2 * 2 + 4, w2 * 2 + 4), 0)
+        ImageDraw.Draw(img).ellipse([2, w2 - h2 + 2, 2 * w2 + 2, w2 + h2 + 2], fill=255)
+        img = img.rotate(rot, resample=Image.BICUBIC)
+        ox = x + math.cos(math.radians(rot)) * w2 * 0.9
+        oy = y - math.sin(math.radians(rot)) * w2 * 0.9
+        mask.paste(255, (round(ox - img.width / 2), round(oy - img.height / 2)), img)
+
+    for i, deg in enumerate(angles):
+        a = math.radians(deg if side > 0 else 180 - deg)
+        x, y = cx + r * math.cos(a), cy - r * math.sin(a)
+        pts.append((x, y))
+        k = 1.0 - 0.4 * i / max(1, leaves - 1)          # 先端ほど小さく
+        w2, h2 = max(2, round(lw * k)), max(1, round(lh * k))
+        tangent = math.degrees(a) + (90 if side > 0 else -90)   # 枝の先へ向かう方向
+        if i == leaves - 1:
+            put_leaf(x, y, tangent, w2, h2)
+        else:
+            put_leaf(x, y, tangent + 38, w2, h2)
+            put_leaf(x, y, tangent - 38, w2, h2)
+    draw.line(pts, fill=255, width=max(2, lh // 3), joint="curve")  # 枝
+
+
+def crest(canvas, cx, cy, s):
+    """紋章: 深い赤の盾に金の Y、周りに月桂樹、上に三日月 (幽玄の月)。"""
+    w, h = canvas.size
+    pts = [(cx - 0.5 * s, cy - 0.55 * s), (cx + 0.5 * s, cy - 0.55 * s), (cx + 0.5 * s, cy + 0.05 * s),
+           (cx, cy + 0.62 * s), (cx - 0.5 * s, cy + 0.05 * s)]
+    ImageDraw.Draw(canvas).polygon(pts, fill=DEEP_RED)
+    m = Image.new("L", (w, h), 0)
+    md = ImageDraw.Draw(m)
+    md.polygon(pts, outline=255, width=max(3, round(s * 0.06)))
+    draw_text(md, cx, cy - 0.50 * s, "Y", font(PLAYFAIR, s * 0.70, 700), 255, align="center")
+    for side in (-1, 1):
+        laurel(m, cx, cy + 0.02 * s, s * 0.78, side, leaves=6, leaf=(round(s * 0.085), round(s * 0.032)))
+    # 三日月: 円から少しずらした円を抜く
+    mr = s * 0.13
+    my = cy - 0.78 * s
+    moon = Image.new("L", (w, h), 0)
+    ImageDraw.Draw(moon).ellipse([cx - mr, my - mr, cx + mr, my + mr], fill=255)
+    ImageDraw.Draw(moon).ellipse([cx - mr + mr * 0.45, my - mr - mr * 0.15, cx + mr + mr * 0.45, my + mr - mr * 0.15], fill=0)
+    m = ImageChops.lighter(m, moon)
+    foil(canvas, m, emboss=max(2, round(s * 0.02)))
+
+
 # ---------------------------------------------------------------- ラベル
 def notched_rect(W, H, inset=0, corner=0.045):
     """四隅が凹んだ長方形 (時計回りの点列)。"""
@@ -158,36 +236,20 @@ def notched_rect(W, H, inset=0, corner=0.045):
             a = math.radians(a_from + (a_to - a_from) * i / steps)
             pts.append((cx + r * math.cos(a), cy + r * math.sin(a)))
 
-    # 画像座標 (y 下向き)。左上の角は (x0, y0) を中心に 90°→0° で内側を回る
-    arc(x0, y0, 90, 0)          # 左辺上端 → 上辺左端
-    arc(x1, y0, 180, 90)        # 上辺右端 → 右辺上端
-    arc(x1, y1, 270, 180)       # 右辺下端 → 下辺右端
-    arc(x0, y1, 0, -90)         # 下辺左端 → 左辺下端
+    # 画像座標 (y 下向き)。各角を中心に内側へ四分円を回る
+    arc(x0, y0, 90, 0)
+    arc(x1, y0, 180, 90)
+    arc(x1, y1, 270, 180)
+    arc(x0, y1, 0, -90)
     return pts
 
 
-def barrels(md, cx, base_y, s, width):
-    """ソレラ (積み重ねた熟成樽) の線画。2 段: 下 3 樽、上 2 樽。"""
-    r = s * 0.5
-    rows = [(-1, 0, 1), (-0.5, 0.5)]
-    for k, row in enumerate(rows):
-        cy = base_y - r - k * (r * 1.72)
-        for i in row:
-            x = cx + i * r * 2.08
-            md.ellipse([x - r, cy - r, x + r, cy + r], outline=255, width=width)
-            md.ellipse([x - r * 0.80, cy - r * 0.80, x + r * 0.80, cy + r * 0.80], outline=255, width=max(1, width // 2))
-            # 鏡板の板目 (縦線) と栓
-            for t in (-0.45, 0.0, 0.45):
-                h = math.sqrt(max(0.0, 0.64 - t * t)) * r
-                md.line([(x + t * r, cy - h), (x + t * r, cy + h)], fill=255, width=max(1, width // 2))
-            md.ellipse([x - r * 0.08, cy + r * 0.42, x + r * 0.08, cy + r * 0.58], fill=255)
-    # 床の線
-    md.line([(cx - r * 3.6, base_y), (cx + r * 3.6, base_y)], fill=255, width=width)
-
-
-def rule(md, cx, y, half, thick, gap):
+def diamond_rule(md, cx, y, half, thick, gap):
+    """中央にひし形の付いた細い罫線。"""
     md.line([(cx - half, y), (cx - gap, y)], fill=255, width=thick)
     md.line([(cx + gap, y), (cx + half, y)], fill=255, width=thick)
+    r = thick * 3
+    md.polygon([(cx - r, y), (cx, y - r), (cx + r, y), (cx, y + r)], fill=255)
 
 
 def label_canvas():
@@ -203,53 +265,45 @@ def label_canvas():
     edge = shape.filter(ImageFilter.GaussianBlur(18))
     canvas = ImageChops.multiply(canvas, Image.merge("RGB", [edge.point(lambda a: 220 + a * 35 // 255)] * 3))
 
-    # 枠: 外側に細い赤線、内側にさらに細い線 (どちらも角の切り欠きに沿う)
+    # 枠: 外側に深い赤の太線と細線 (角の切り欠きに沿う)、内側に細い金線、四隅に赤いひし形
     m = Image.new("L", (W, H), 0)
     md = ImageDraw.Draw(m)
-    for inset, width in ((40, 7), (60, 2)):
+    for inset, width in ((40, 8), (62, 2)):
         pts = notched_rect(W, H, inset)
         md.line(pts + [pts[0]], fill=255, width=width, joint="curve")
+    for x, y in ((150, 150), (W - 151, 150), (W - 151, H - 151), (150, H - 151)):
+        r = 14
+        md.polygon([(x - r, y), (x, y - r), (x + r, y), (x, y + r)], fill=255)
     ink_texture(canvas, m, DEEP_RED, strength=0.1)
-
-    # 下の赤い帯
-    band_top, band_bot = H * 0.790, H - 1 - 60
-    band = Image.new("L", (W, H), 0)
-    ImageDraw.Draw(band).rectangle([60, band_top, W - 61, band_bot], fill=255)
-    band = ImageChops.multiply(band, shape)
-    canvas.paste(DEEP_RED, (0, 0), band)
-
-    d = ImageDraw.Draw(canvas)
-    draw_text(d, cx, H * 0.080, "SOLERA  ESPECIAL", font(CORMORANT, H * 0.048, 700), DEEP_RED,
-              spacing=H * 0.012, align="center")
-
-    # ソレラの樽 (セピアの線画)
     m = Image.new("L", (W, H), 0)
-    barrels(ImageDraw.Draw(m), cx, H * 0.345, H * 0.098, 5)
-    ink_texture(canvas, m, SEPIA, strength=0.12)
+    pts = notched_rect(W, H, 84)
+    ImageDraw.Draw(m).line(pts + [pts[0]], fill=255, width=2, joint="curve")
+    foil(canvas, m, emboss=1)
 
-    # 銘柄
+    crest(canvas, cx, H * 0.185, H * 0.135)
+
+    # 銘柄 YŪGEN (長音記号つき)
     m = Image.new("L", (W, H), 0)
-    f = font(PLAYFAIR, H * 0.175, 800)
-    draw_text(ImageDraw.Draw(m), cx, H * 0.345, BRAND, f, 255, spacing=H * 0.020, align="center")
+    f = font(PLAYFAIR, H * 0.150, 800)
+    draw_text(ImageDraw.Draw(m), cx, H * 0.320, BRAND, f, 255, spacing=H * 0.030, align="center")
     ink_texture(canvas, m, INK)
 
-    draw_text(d, cx, H * 0.548, "OLOROSO", font(CORMORANT, H * 0.068, 600), DEEP_RED,
-              spacing=H * 0.030, align="center")
-
-    # 年号 (左右に細い線)
     m = Image.new("L", (W, H), 0)
-    md = ImageDraw.Draw(m)
-    f = font(PLAYFAIR, H * 0.085, 700)
-    draw_text(md, cx, H * 0.640, YEAR, f, 255, spacing=H * 0.012, align="center")
-    yw = text_width(YEAR, f, H * 0.012)
-    rule(md, cx, H * 0.695, W * 0.36, 3, yw / 2 + W * 0.03)
-    ink_texture(canvas, m, INK, strength=0.1)
+    diamond_rule(ImageDraw.Draw(m), cx, H * 0.535, W * 0.26, 4, W * 0.02)
+    foil(canvas, m, emboss=1)
 
-    # 赤い帯の中の文字 (クリーム色)
-    draw_text(d, cx, H * 0.815, "JEREZ \u00b7 XÉRÈS \u00b7 SHERRY", font(CORMORANT, H * 0.050, 700), PAPER,
+    d = ImageDraw.Draw(canvas)
+    draw_text(d, cx, H * 0.560, "OLOROSO", font(CORMORANT, H * 0.072, 600), DEEP_RED,
+              spacing=H * 0.030, align="center")
+    draw_text(d, cx, H * 0.665, "SOLERA  GRAN  RESERVA", font(CORMORANT, H * 0.038, 700), INK_SOFT,
               spacing=H * 0.010, align="center")
-    draw_text(d, cx, H * 0.885, "BODEGAS " + BRAND + "  \u00b7  JEREZ DE LA FRONTERA", font(CORMORANT, H * 0.030, 600),
-              PAPER, spacing=H * 0.005, align="center")
+    draw_text(d, cx, H * 0.725, "JEREZ \u00b7 XÉRÈS \u00b7 SHERRY", font(CORMORANT, H * 0.040, 700), DEEP_RED,
+              spacing=H * 0.008, align="center")
+    # 年号は控えめに小さく
+    draw_text(d, cx, H * 0.792, "\u2014  " + YEAR + "  \u2014", font(CORMORANT, H * 0.036, 600), INK_SOFT,
+              spacing=H * 0.006, align="center")
+    draw_text(d, cx, H * 0.862, "BODEGAS " + BRAND + "  \u00b7  JEREZ DE LA FRONTERA", font(CORMORANT, H * 0.028, 600),
+              INK_SOFT, spacing=H * 0.005, align="center")
 
     out = Image.new("RGBA", (W, H))
     out.paste(canvas, (0, 0), shape)
