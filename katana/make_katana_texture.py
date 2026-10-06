@@ -6,11 +6,11 @@ Blender ではなく通常の Python + Pillow で実行します:
     pip install pillow
     python make_katana_texture.py
 
-アトラスのレイアウト (UV は左下原点, 2048x2048):
+アトラスのレイアウト (UV は左下原点, 8192x8192):
     v 0.00-0.36 / u 0.00-1.00 : 刃 (横 = 根元→切っ先, 縦 = 刃先→峰)
     v 0.38-0.66 / u 0.00-1.00 : 柄巻き (横 = 鍔側→柄頭, 縦 = 一周)
     v 0.68-0.76 / u 0.00-1.00 : 金具 (金)
-    v 0.78-0.98 / u 0.00-0.20 : 三つ巴の紋
+    v 0.78-0.98 / u 0.00-0.20 : 三つ巴の紋 (予備。今のモデルは紋を立体で作るので白い光を使う)
     v 0.78-0.98 / u 0.22-0.30 : 白い光 (紋のふち・光る玉)
     v 0.78-0.98 / u 0.32-0.52 : 鍔
     v 0.78-0.98 / u 0.54-0.64 : 柄頭の炎 (下 = 根元の白 → 上 = 先端の黄色)
@@ -26,7 +26,8 @@ from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(HERE, "Katana_Atlas.png")
-SIZE = 2048
+SIZE = 8192            # 実用上の最大 (Unity の Max Size で 4096 / 2048 などに下げられる)
+F = SIZE / 2048        # 線の太さ・ぼかしの量を解像度に合わせる係数
 
 UV_BLADE = (0.0, 0.0, 1.0, 0.36)
 UV_HANDLE = (0.0, 0.38, 1.0, 0.66)
@@ -110,8 +111,9 @@ def draw_blade(atlas):
     rng = random.Random(5)
     start, end = w * 0.075, w * 0.84
 
-    def squeeze(x):  # 先 (切っ先側) へ行くほど帯が細くなる
-        return 1.0 - max(0.0, (x - w * 0.60) / (end - w * 0.60)) * 0.85
+    def squeeze(x):  # 根元はとがって始まり、先 (切っ先側) へ行くほど帯が細くなる
+        head = min(1.0, max(0.05, (x - start) / (w * 0.07))) ** 0.6
+        return head * (1.0 - max(0.0, (x - w * 0.60) / (end - w * 0.60)) * 0.85)
 
     top = flame_edge(start, end, lambda x: Y(0.52 + 0.22 * squeeze(x)), -h * 0.10, w * 0.055, rng)
     bot = flame_edge(start, end, lambda x: Y(0.52 - 0.22 * squeeze(x)), h * 0.10, w * 0.062, rng)
@@ -126,18 +128,18 @@ def draw_blade(atlas):
     for k in range(7):
         v = 0.36 + 0.06 * k
         ph = rng.uniform(0, math.tau)
-        pts = [(x, Y(v + 0.035 * math.sin(x / w * 18 + ph))) for x in range(int(start), int(end), 6)]
-        sd.line(pts, fill=255, width=rng.randint(6, 14))
-    streak = ImageChops.multiply(streak, mask).filter(ImageFilter.GaussianBlur(3))
+        pts = [(x, Y(v + 0.035 * math.sin(x / w * 18 + ph))) for x in range(int(start), int(end), int(6 * F))]
+        sd.line(pts, fill=255, width=int(rng.randint(6, 14) * F))
+    streak = ImageChops.multiply(streak, mask).filter(ImageFilter.GaussianBlur(3 * F))
     img.paste(PANEL_DARK, (0, 0), streak.point(lambda a: a * 0.7))
     light = Image.new("L", (w, h), 0)
     ld = ImageDraw.Draw(light)
     for k in range(4):
         v = 0.42 + 0.08 * k
         ph = rng.uniform(0, math.tau)
-        pts = [(x, Y(v + 0.03 * math.sin(x / w * 23 + ph))) for x in range(int(start), int(end), 6)]
-        ld.line(pts, fill=255, width=4)
-    light = ImageChops.multiply(light, mask).filter(ImageFilter.GaussianBlur(1.5))
+        pts = [(x, Y(v + 0.03 * math.sin(x / w * 23 + ph))) for x in range(int(start), int(end), int(6 * F))]
+        ld.line(pts, fill=255, width=int(4 * F))
+    light = ImageChops.multiply(light, mask).filter(ImageFilter.GaussianBlur(1.5 * F))
     img.paste(PANEL_LIGHT, (0, 0), light)
 
     # 切っ先近く: 帯がほどけて炎のすじになる
@@ -149,15 +151,15 @@ def draw_blade(atlas):
         v = rng.uniform(0.38, 0.66)
         th = h * rng.uniform(0.04, 0.08)
         wd.polygon([(xs, Y(v) - th / 2), (xs + ln, Y(v + 0.05)), (xs, Y(v) + th / 2)], fill=255)
-    img.paste(PANEL, (0, 0), wisp.filter(ImageFilter.GaussianBlur(1)))
+    img.paste(PANEL, (0, 0), wisp.filter(ImageFilter.GaussianBlur(1 * F)))
 
     # 根元: 紫を濃くして三つ巴の紋のまわりに影
     base = Image.new("L", (w, h), 0)
     ImageDraw.Draw(base).rectangle([0, Y(0.95), w * 0.07, Y(0.05)], fill=255)
-    img.paste(PANEL_DARK, (0, 0), base.filter(ImageFilter.GaussianBlur(20)).point(lambda a: a * 0.5))
+    img.paste(PANEL_DARK, (0, 0), base.filter(ImageFilter.GaussianBlur(20 * F)).point(lambda a: a * 0.5))
 
     # 全体をほんの少しぼかして光っている感じに
-    glow = img.filter(ImageFilter.GaussianBlur(4))
+    glow = img.filter(ImageFilter.GaussianBlur(4 * F))
     img = Image.blend(img, glow, 0.25)
     atlas.paste(img, (x0, y0))
 
@@ -165,10 +167,11 @@ def draw_blade(atlas):
 # ---------------------------------------------------------------- 柄
 def marble(size, c0, c1, scale=40):
     w, h = size
+    scale = int(scale * F)
     n1 = Image.effect_noise((max(1, w // scale), max(1, h // scale)), 80).resize((w, h), Image.BICUBIC)
     n2 = Image.effect_noise((max(1, w // (scale // 3)), max(1, h // (scale // 3))), 60).resize((w, h), Image.BICUBIC)
     n = ImageChops.add(n1.point(lambda v: v * 0.7), n2.point(lambda v: v * 0.3))
-    n = n.filter(ImageFilter.GaussianBlur(3))
+    n = n.filter(ImageFilter.GaussianBlur(3 * F))
     lut = [lerp_color([(0.0, c0), (0.5, ((c0[0] + c1[0]) // 2, (c0[1] + c1[1]) // 2, (c0[2] + c1[2]) // 2)), (1.0, c1)],
                       min(1.0, max(0.0, (v - 70) / 120))) for v in range(256)]
     r = n.point([c[0] for c in lut])
@@ -190,14 +193,15 @@ def draw_handle(atlas):
         for sgn in (1, -1):
             bd.line([(xa, 0), (xa + sgn * period * 3, h * 3)], fill=255, width=int(h * 0.075))
     band = band.crop((0, h, w, h * 2))
-    img.paste(SILVER_DARK, (0, 0), ImageChops.offset(band, 2, 3).filter(ImageFilter.GaussianBlur(2)))
+    img.paste(SILVER_DARK, (0, 0), ImageChops.offset(band, int(2 * F), int(3 * F)).filter(ImageFilter.GaussianBlur(2 * F)))
     img.paste(SILVER, (0, 0), band)
     # 帯の上の細かい模様 (点線)
     dots = Image.new("L", (w, h), 0)
     dd = ImageDraw.Draw(dots)
-    for x in range(0, w, 9):
-        for y in range(0, h, 9):
-            dd.point((x, y), fill=255)
+    step = int(9 * F)
+    for x in range(0, w, step):
+        for y in range(0, h, step):
+            dd.rectangle([x, y, x + F - 1, y + F - 1], fill=255)
     img.paste(SILVER_DARK, (0, 0), ImageChops.multiply(dots, band))
     atlas.paste(img, (x0, y0))
 
@@ -259,7 +263,7 @@ def draw_tsuba(atlas):
     w, h = x1 - x0, y1 - y0
     img = vgradient((w, h), [(0.0, (236, 226, 255)), (0.5, GLOW_WHITE), (1.0, (230, 218, 252))])
     d = ImageDraw.Draw(img)
-    d.rectangle([6, 6, w - 7, h - 7], outline=(200, 182, 246), width=6)
+    d.rectangle([6 * F, 6 * F, w - 7 * F, h - 7 * F], outline=(200, 182, 246), width=int(6 * F))
     atlas.paste(img, (x0, y0))
 
 

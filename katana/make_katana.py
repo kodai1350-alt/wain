@@ -14,11 +14,13 @@ FBX で書き出す Blender スクリプト (Blender 5.1 で動作確認)。
   - Katana.fbx と Katana_Atlas.png を出力フォルダに書き出し
 
 仕様:
+  - 刃の反り・三つ巴の紋・紫のトゲ・鍔は参考画像 (ゲーム画面) を測って合わせています
   - VRChat のアバター (身長 1.4〜1.6m 前後) に合わせた大きさ: 全長 約 1.07m
     (刃 80cm・柄 20cm・柄頭の飾り 約 7cm)。参考画像のように刃が柄の約 4 倍の細長いバランス。
     SCALE で全体の大きさを変えられます
   - Unity では刃が上 (Y)、刃先が前 (+Z)。原点は鍔の中心
-  - 約 2,500 三角形、テクスチャはアトラス 1 枚を 2 つのマテリアルで共有
+  - テクスチャはアトラス 1 枚 (8192x8192) を 2 つのマテリアルで共有。
+    FBX には埋め込まず、隣に PNG を置きます (Unity で同じフォルダに入れてください)
 
 テクスチャ Katana_Atlas.png は make_katana_texture.py で作ったものを
 このスクリプトと同じフォルダ (または .blend と同じフォルダ) に置いてください。
@@ -37,9 +39,13 @@ from mathutils import Matrix, Vector
 SCALE = 1.0            # 全体の大きさ (1.0 = 全長 約 1.07m)
 BLADE_LEN = 0.80       # 刃の長さ (m)
 HANDLE_LEN = 0.20      # 柄の長さ (m)
-SORI = 0.042           # 反り (刃の付け根と切っ先を結ぶ線からの深さ, m)
-BLADE_W = 0.028        # 刃の幅 (付け根, m)
-BLADE_T = 0.0070       # 刃の厚み (付け根, m)
+# 反り: 刃の向きが根元から切っ先までに曲がる角度 (度)。参考画像を測った値。
+#   根元から半ばまではゆるやか (CURVE_BASE)、先の 2 割で急に曲がる (CURVE_TIP, 先反り)
+CURVE_BASE = 27.0      # 参考画像の反りの深さ (弦の約 7.9%) に合わせた値
+CURVE_TIP = 28.0
+CURVE_TIP_POWER = 12
+BLADE_W = 0.032        # 刃の幅 (m)。参考画像どおり切っ先近くまでほぼ一定
+BLADE_T = 0.0075       # 刃の厚み (付け根, m)
 OUTPUT_DIR = ""        # 空なら: .blend のフォルダ → スクリプトのフォルダ → ホーム の順
 FBX_NAME = "Katana.fbx"
 ATLAS_NAME = "Katana_Atlas.png"
@@ -57,6 +63,7 @@ UV_TSUBA = (0.32, 0.78, 0.52, 0.98)
 UV_FLAME = (0.54, 0.78, 0.64, 0.98)
 UV_FIN = (0.66, 0.78, 0.86, 0.98)
 UV_PAD = 0.002
+UV_DARK = (0.93, 0.88)        # アトラスの空き部分 (濃い紫一色)。紋の台座に使う
 
 MAT_BLADE, MAT_HILT = 0, 1
 X = Vector((1.0, 0.0, 0.0))   # 刃の厚み方向
@@ -98,19 +105,44 @@ def find_atlas():
 
 
 # ---------------------------------------------------------------- 刀の中心線
+def bend(t):
+    """刃の付け根から t (m, 峰に沿った長さ) での曲がり角 (ラジアン)。峰側 (+Y) へ曲がる。"""
+    u = min(max(t / BLADE_LEN, 0.0), 1.0)
+    return math.radians(CURVE_BASE * u + CURVE_TIP * u ** CURVE_TIP_POWER)
+
+
+_SPINE = []
+
+
+def _spine_table():
+    """峰の線を長さに沿って積分した点の表 (刃の部分)。"""
+    if _SPINE:
+        return _SPINE
+    n = 800
+    p = Vector((0.0, 0.0, 0.0))
+    _SPINE.append(p.copy())
+    ds = BLADE_LEN / n
+    for i in range(n):
+        a = bend((i + 0.5) * ds)
+        p += Vector((0.0, math.sin(a), math.cos(a))) * ds
+        _SPINE.append(p.copy())
+    return _SPINE
+
+
 def spine(t):
-    """峰の線。t = 鍔からの距離 (刃側が正、柄側が負)。反りは峰側 (+Y) へ。"""
-    k = SORI / BLADE_LEN ** 2
-    return Vector((0.0, k * t * t, t))
+    """峰の線。t = 鍔からの長さ (刃側が正、柄側が負)。柄はまっすぐ。"""
+    if t <= 0:
+        return Vector((0.0, 0.0, t))
+    table = _spine_table()
+    f = min(t, BLADE_LEN) / BLADE_LEN * (len(table) - 1)
+    i = min(int(f), len(table) - 2)
+    return table[i].lerp(table[i + 1], f - i)
 
 
 def frame(t):
     """t での (接線, 刃先方向)。刃先方向は -Y 寄り。"""
-    k = SORI / BLADE_LEN ** 2
-    dy = 2 * k * t
-    tangent = Vector((0.0, dy, 1.0)).normalized()
-    edge_dir = Vector((0.0, -1.0, dy)).normalized()
-    return tangent, edge_dir
+    a = bend(t) if t > 0 else 0.0
+    return Vector((0.0, math.sin(a), math.cos(a))), Vector((0.0, -math.cos(a), math.sin(a)))
 
 
 def center(t):
@@ -218,13 +250,8 @@ class Builder:
 
 def blade_profile(t):
     """t での (刃の幅, 厚み)。"""
-    tk = BLADE_LEN * 0.92               # 横手 (切っ先の始まり)
-    if t < 0.05:
-        w = BLADE_W * 1.06
-    elif t < 0.16:
-        w = lerp(BLADE_W * 1.06, BLADE_W, (t - 0.05) / 0.11)
-    else:
-        w = lerp(BLADE_W, BLADE_W * 0.80, (t - 0.16) / (tk - 0.16))
+    tk = BLADE_LEN * 0.88               # 横手 (切っ先の始まり)
+    w = lerp(BLADE_W, BLADE_W * 0.94, min(1.0, t / tk))   # ほぼ一定の幅
     th = lerp(BLADE_T, BLADE_T * 0.65, min(1.0, t / tk))
     if t > tk:                           # 切っ先: 刃先の線が丸く峰へ向かう
         u = (t - tk) / (BLADE_LEN - tk)
@@ -236,9 +263,9 @@ def blade_profile(t):
 
 def build_blade(b):
     """刃: 刃先・鎬・峰をもつ 6 角の断面を、反った中心線に沿ってつなぐ。"""
-    tk = BLADE_LEN * 0.92
-    ts = [0.0] + [tk * (i / 40) ** 0.9 for i in range(1, 41)]
-    ts += [lerp(tk, BLADE_LEN, i / 10) for i in range(1, 10)]
+    tk = BLADE_LEN * 0.88
+    ts = [0.0] + [tk * (i / 44) for i in range(1, 45)]
+    ts += [lerp(tk, BLADE_LEN, (i / 14) ** 0.8) for i in range(1, 14)]
     v_of = (0.0, 0.55, 0.85, 1.0, 0.85, 0.55)   # 刃先 → 鎬 → 峰 → 峰の頂 → 峰 → 鎬
     rings = []
     for t in ts:
@@ -266,7 +293,7 @@ def build_blade(b):
 
 
 def build_habaki(b):
-    """刃の付け根の金の鎺 (はばき)。"""
+    """刃の付け根の鎺 (はばき)。参考画像どおり濃い紫。"""
     rings = []
     for t, grow in ((0.0, 0.0024), (0.032, 0.0016)):
         w, th = blade_profile(t)
@@ -275,44 +302,74 @@ def build_habaki(b):
         hx = th / 2 + grow
         rings.append([p - n * grow + X * hx, p + n * (w + grow) + X * hx * 0.55,
                       p + n * (w + grow) - X * hx * 0.55, p - n * grow - X * hx])
-    b.rings(rings, lambda i, j: map_rect(UV_GOLD, j / 4, i), MAT_HILT,
-            cap_start=lambda co: map_rect(UV_GOLD, 0.5, 0.5), cap_end=lambda co: map_rect(UV_GOLD, 0.5, 0.5))
+    b.rings(rings, lambda i, j: map_rect(UV_FIN, j / 4, i), MAT_BLADE,
+            cap_start=lambda co: map_rect(UV_FIN, 0.5, 0.5), cap_end=lambda co: map_rect(UV_FIN, 0.5, 0.5))
+
+
+def tomoe_outline(R, rot, sweep=math.radians(100), n=18):
+    """巴 1 つの外形 (2D)。丸い頭の外側半分から、外周に沿って細い尾が伸びてとがる。"""
+    hd, hr = R * 0.50, R * 0.30                   # 頭の円の中心までの距離と半径
+    hx, hy = hd * math.cos(rot), hd * math.sin(rot)
+    # 尾の内側の線の始まり: 頭の円の「進む向き」側の点
+    fx, fy = hx - hr * math.sin(rot), hy + hr * math.cos(rot)
+    rf, af = math.hypot(fx, fy), rot + math.atan2(hr, hd)   # 角度は rot 基準で (一周の巻き戻りを防ぐ)
+    pts = []
+    for i in range(n + 1):                        # 外側の線 (頭の外側 → 尾の先)
+        t = i / n
+        a = rot + t * sweep
+        r = lerp(hd + hr, R * 0.97, t ** 0.7)
+        pts.append((r * math.cos(a), r * math.sin(a)))
+    for i in range(n - 1, -1, -1):                # 内側の線 (尾の先 → 頭の前の点)
+        t = i / n
+        a = lerp(af, rot + sweep, t)
+        r = lerp(rf, R * 0.97, t ** 0.8)
+        pts.append((r * math.cos(a), r * math.sin(a)))
+    for i in range(1, n * 2):                     # 頭の円 (前 → 内側 → 後ろ → 外側)
+        phi = rot + math.pi / 2 + 1.5 * math.pi * i / (n * 2)
+        pts.append((hx + hr * math.cos(phi), hy + hr * math.sin(phi)))
+    return pts
 
 
 def build_emblem(b):
-    """刃の付け根の三つ巴の紋 (円盤)。峰側に少しはみ出す。"""
-    t0 = 0.068
-    _, n = frame(t0)
-    tan, _ = frame(t0)
-    c = spine(t0) + n * (BLADE_W * 0.32)
-    r = BLADE_W * 0.80
-    seg = 32
-    half = BLADE_T / 2 + 0.0022
-    rings = []
-    for side in (-1, 1):
-        rings.append([c + X * (half * side) + (n * math.cos(a) + tan * math.sin(a)) * r
-                      for a in (math.tau * j / seg for j in range(seg))])
-    # 表と裏の面は紋の画像、側面は白く光る縁
-    def face_uv(co):
-        d = co - c
-        return map_rect(UV_EMBLEM, 0.5 + d.dot(tan) / r * 0.5, 0.5 + d.dot(n) / r * 0.5)
+    """刃の付け根の三つ巴の紋。外側の円はなく、3 つの巴が刃の幅からはみ出す。"""
+    t0 = 0.052
+    tan, n = frame(t0)
+    c = spine(t0) + n * (BLADE_W * 0.50)
+    R = BLADE_W * 0.80
+    half = BLADE_T / 2 + 0.0020
 
-    b.rings(rings, lambda i, j: map_rect(UV_WHITE, 0.5, j / seg), MAT_BLADE, cap_start=face_uv, cap_end=face_uv)
+    def to3d(a, bb, d):
+        return c + tan * a + n * bb + X * d
+
+    # 巴の後ろの濃い紫の台座 (巴より少し薄い円盤) — 白い巴の形がはっきり見えるように
+    seg = 28
+    disc = [(R * 1.02 * math.cos(math.tau * j / seg), R * 1.02 * math.sin(math.tau * j / seg)) for j in range(seg)]
+    b.prism(disc, to3d, -(half - 0.0008), half - 0.0008,
+            lambda a, bb: UV_DARK, lambda s_, t_: UV_DARK, MAT_BLADE)
+    for i in range(3):
+        outline = tomoe_outline(R, math.radians(90 + 120 * i))
+        b.prism(outline, to3d, -half, half,
+                lambda a, bb: map_rect(UV_WHITE, 0.5, 0.5),
+                lambda s_, t_: map_rect(UV_WHITE, 0.5, 0.5), MAT_BLADE)
 
 
 def build_fin(b):
-    """紋のそばの峰側に付く、紫の炎のようなヒレ (柄の方へなびく)。"""
-    outline = [(0.020, 0.000), (0.046, -0.004), (0.060, -0.010), (0.034, -0.020), (0.008, -0.030),
-               (0.024, -0.016), (0.000, -0.012), (0.012, -0.004)]
-    s = BLADE_W / 0.031
+    """紋の峰側から柄の方へ斜め (約 40 度) に伸びる、細長くとがった濃い紫のトゲ。"""
+    L, Wd = BLADE_W * 2.3, BLADE_W * 0.36
+    ang = math.radians(40)
+    # トゲの付け根 (紋の峰側) からの (柄の方へ, 峰の外へ) の 2D 外形
+    shape = [(0.0, -Wd * 0.5), (L * 0.35, -Wd * 0.55), (L, 0.0), (L * 0.35, Wd * 0.45), (0.0, Wd * 0.5)]
+    t0 = 0.050
+    tan, n = frame(t0)
+    base = spine(t0) + n * (BLADE_W * 0.15)
+    axis = (-tan * math.cos(ang) - n * math.sin(ang))   # 柄の方へ、峰の外へ
+    side = tan * math.sin(ang) - n * math.cos(ang)
 
     def to3d(a, bb, d):
-        t = 0.030 + a * s
-        _, n = frame(t)
-        return spine(t) + n * (bb * s) + X * d
+        return base + axis * a + side * bb + X * d
 
-    b.prism(outline, to3d, -0.0014, 0.0014,
-            lambda a, bb: map_rect(UV_FIN, a / 0.06, -bb / 0.03),
+    b.prism(shape, to3d, -0.0016, 0.0016,
+            lambda a, bb: map_rect(UV_FIN, a / L, 0.5 + bb / Wd),
             lambda s_, t_: map_rect(UV_FIN, s_, t_), MAT_BLADE)
 
 
@@ -354,13 +411,13 @@ def build_handle(b):
 
 
 def build_fittings(b):
-    """縁 (ふち) と柄頭 (かしら) の金具。"""
+    """縁 (ふち) と柄頭 (かしら) の金具。縁は濃い紫、柄頭は金。"""
     seg = 20
     gold = lambda i, j: map_rect(UV_GOLD, j / seg, 0.5)
-    # 縁: 鍔の下の金の輪
+    # 縁: 鍔の下の輪 (参考画像どおり濃い紫)
     rx, rn = handle_radius(-0.008)
     rings = [ellipse_ring(t, rx, rn, seg, s) for t, s in ((-0.008, 1.10), (-0.020, 1.08), (-0.022, 1.0))]
-    b.rings(rings, gold, MAT_HILT)
+    b.rings(rings, lambda i, j: map_rect(UV_FIN, j / seg, i / 2), MAT_BLADE)
     # 柄頭: 丸くすぼまる金具
     tE = -HANDLE_LEN
     rx, rn = handle_radius(tE)
@@ -519,8 +576,8 @@ def export_fbx(katana, empties, out_dir):
         mesh_smooth_type="FACE",
         add_leaf_bones=False,
         bake_anim=False,
-        path_mode="COPY",
-        embed_textures=True,
+        path_mode="STRIP",      # 8K テクスチャは FBX に埋め込まず、ファイル名だけ記録して隣に置く
+        embed_textures=False,
     )
     img = bpy.data.images.get(ATLAS_NAME)
     if img:  # Unity でマテリアルに設定しやすいよう PNG も隣に保存
