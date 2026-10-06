@@ -174,39 +174,90 @@ def stripes(size, angle_deg, period, sharp=1.0):
 
 # ---------------------------------------------------------------- 刃
 def flame_edge(x0, x1, base, amp, step, rng):
-    """炎のような境界線 (x0→x1)。base(x) が基準の行、炎の先は切っ先側へなびく。"""
+    """なめらかに揺らめく炎の境界線 (x0→x1)。ゆっくり立ち上がり、切っ先側へなびいて柔らかく戻る。"""
     pts = []
     x = x0
     while x < x1:
-        a = amp * rng.uniform(0.35, 1.0)
-        s = step * rng.uniform(0.6, 1.4)
-        for k in range(8):  # 根元からゆるく立ち上がり、先へ鋭く伸びて、急に戻る
-            t = k / 8
-            lift = math.sin(t * math.pi / 2) ** 2
-            pts.append((x + s * t * 0.85, base(x + s * t * 0.85) + a * lift))
-        pts.append((x + s * 0.85, base(x + s * 0.85) + a))
-        pts.append((x + s, base(x + s)))
+        a = amp * rng.uniform(0.4, 1.0)
+        s = step * rng.uniform(0.7, 1.3)
+        for k in range(16):
+            t = k / 16
+            if t < 0.72:
+                lift = 0.5 - 0.5 * math.cos(math.pi * t / 0.72)
+            else:
+                lift = 0.5 + 0.5 * math.cos(math.pi * (t - 0.72) / 0.28)
+            xx = x + s * t
+            pts.append((xx, base(xx) + a * lift))
         x += s
     pts.append((x1, base(x1)))
     return pts
 
 
+def hgradient(size, stops):
+    w, h = size
+    img = Image.new("RGB", (w, 1))
+    for x in range(w):
+        img.putpixel((x, 0), lerp_color(stops, x / max(1, w - 1)))
+    return img.resize((w, h))
+
+
+def lightning(d, p0, p1, rng, width, depth=6, spread=0.22, branch=0.35):
+    """枝分かれする細い稲妻 (中点をずらして再帰的に描く)。"""
+    (xa, ya), (xb, yb) = p0, p1
+    if depth == 0:
+        d.line([p0, p1], fill=255, width=max(1, int(width)))
+        return
+    ln = math.hypot(xb - xa, yb - ya)
+    mx = (xa + xb) / 2 + rng.uniform(-spread, spread) * ln * (-(yb - ya) / max(ln, 1e-6))
+    my = (ya + yb) / 2 + rng.uniform(-spread, spread) * ln * ((xb - xa) / max(ln, 1e-6))
+    lightning(d, p0, (mx, my), rng, width, depth - 1, spread, branch)
+    lightning(d, (mx, my), p1, rng, width, depth - 1, spread, branch)
+    if depth >= 3 and rng.random() < branch:  # 枝
+        ang = math.atan2(yb - ya, xb - xa) + rng.choice((-1, 1)) * rng.uniform(0.4, 0.9)
+        L = ln * rng.uniform(0.3, 0.6)
+        lightning(d, (mx, my), (mx + math.cos(ang) * L, my + math.sin(ang) * L), rng, width * 0.6, depth - 2, spread, 0)
+
+
+def sparkle(d, x, y, r):
+    """4 本の光の筋をもつ星のきらめき。"""
+    t = max(1.0, r * 0.18)
+    d.polygon([(x - r, y), (x, y - t), (x + r, y), (x, y + t)], fill=255)
+    d.polygon([(x, y - r), (x + t, y), (x, y + r), (x - t, y)], fill=255)
+    d.ellipse([x - t * 1.6, y - t * 1.6, x + t * 1.6, y + t * 1.6], fill=255)
+
+
+def stardust(size, rng, count, stars, area=None):
+    """星屑 (小さな点) と、ところどころの星のきらめき。area は散らす範囲の L マスク。"""
+    w, h = size
+    m = Image.new("L", (w, h), 0)
+    d = ImageDraw.Draw(m)
+    for _ in range(count):
+        x, y = rng.uniform(0, w), rng.uniform(0, h)
+        r = rng.uniform(0.5, 1.5) * F
+        d.ellipse([x - r, y - r, x + r, y + r], fill=rng.randint(150, 255))
+    for _ in range(stars):
+        sparkle(d, rng.uniform(0, w), rng.uniform(0, h), rng.uniform(4, 11) * F)
+    if area is not None:
+        m = ImageChops.multiply(m, area)
+    return m
+
+
 def draw_blade(maps):
     x0, y0, x1, y1 = uv_box(UV_BLADE)
     w, h = x1 - x0, y1 - y0
+    rng = random.Random(11)
 
     def Y(v):  # v (0 = 刃先, 1 = 峰) → 行
         return h - 1 - v * (h - 1)
 
-    img = vgradient((w, h), [(0.0, EDGE_WHITE), (0.10, (240, 214, 254)), (0.25, BLADE_LAV),
-                             (0.86, BLADE_LAV_HI), (1.0, EDGE_WHITE)])
-    # 地肌: 長さ方向に流れる細かい木目のようなムラ
-    grain = Image.effect_noise((max(1, w // int(48 * F)), max(1, h // int(3 * F))), 70).resize((w, h), Image.BICUBIC)
-    img = Image.composite(ImageChops.multiply(img, Image.new("RGB", (w, h), (226, 200, 248))), img,
-                          grain.point(lambda v: max(0, v - 128) // 3))
+    # 地: 根元から切っ先へ、オーロラのようにほのかに色が移ろう (薄紫 → 桜色 → 青みの薄紫)
+    tint = hgradient((w, h), [(0.0, (236, 204, 255)), (0.40, (247, 208, 252)), (0.72, (232, 210, 255)),
+                              (0.92, (222, 216, 255)), (1.0, (242, 234, 255))])
+    shade = vgradient((w, h), [(0.0, (255, 255, 255)), (0.18, (246, 240, 252)), (0.5, (236, 228, 248)),
+                               (0.86, (250, 246, 255)), (1.0, (255, 255, 255))])
+    img = ImageChops.multiply(tint, shade)
 
-    # 刃文: 刃先に沿って白く波打つ帯 (のたれ + 互の目)
-    rng = random.Random(11)
+    # 刃文: 刃先に沿って白く柔らかに光る帯 (のたれ + 互の目)
     hamon = [(0, Y(0.0))]
     ph = rng.uniform(0, math.tau)
     for xi in range(0, w + 1, int(8 * F)):
@@ -217,114 +268,124 @@ def draw_blade(maps):
     hamon.append((w, Y(0.0)))
     hm = Image.new("L", (w, h), 0)
     ImageDraw.Draw(hm).polygon(hamon, fill=255)
-    hm_soft = blur(hm, 3)
+    hm_soft = blur(hm, 5)
     img.paste(EDGE_WHITE, (0, 0), hm_soft)
-    # 匂口: 刃文の境目に沿った細い薄紫の線 (白い刃文と地の境をはっきりさせる)
-    nioi = Image.new("L", (w, h), 0)
-    ImageDraw.Draw(nioi).line(hamon[1:-1], fill=255, width=int(3 * F))
-    img.paste((206, 168, 250), (0, 0), blur(nioi, 1.5).point(lambda a: a * 0.7))
-    # 沸 (にえ): 刃文の境目のきらめき
-    nie = Image.new("L", (w, h), 0)
+    nioi = Image.new("L", (w, h), 0)                    # 匂口: ごく淡い薄紫のにじみ
+    ImageDraw.Draw(nioi).line(hamon[1:-1], fill=255, width=int(4 * F))
+    img.paste((222, 192, 255), (0, 0), blur(nioi, 3).point(lambda a: a * 0.5))
+    nie = Image.new("L", (w, h), 0)                     # 沸: 刃文の境目のきらめき
     nd = ImageDraw.Draw(nie)
     for (xa, ya) in hamon[1:-1:2]:
         for _ in range(3):
             r = rng.uniform(0.6, 1.6) * F
-            yy = ya + rng.uniform(-6, 6) * F
+            yy = ya + rng.uniform(-8, 8) * F
             nd.ellipse([xa - r, yy - r, xa + r, yy + r], fill=255)
 
-    # 中央の紫の模様 (根元はとがって始まり、切っ先へ細くなる。上下の縁は炎の舌)
+    # 中央の紫の模様: なめらかに揺らめく炎の形
     start, end = w * 0.075, w * 0.84
 
     def squeeze(x):
         head = min(1.0, max(0.05, (x - start) / (w * 0.07))) ** 0.6
         return head * (1.0 - max(0.0, (x - w * 0.60) / (end - w * 0.60)) * 0.85)
 
-    top = flame_edge(start, end, lambda x: Y(0.53 + 0.21 * squeeze(x)), -h * 0.10, w * 0.055, rng)
-    bot = flame_edge(start, end, lambda x: Y(0.53 - 0.21 * squeeze(x)), h * 0.10, w * 0.062, rng)
+    top = flame_edge(start, end, lambda x: Y(0.53 + 0.20 * squeeze(x)), -h * 0.09, w * 0.06, rng)
+    bot = flame_edge(start, end, lambda x: Y(0.53 - 0.20 * squeeze(x)), h * 0.09, w * 0.066, rng)
     panel = [(start, Y(0.53))] + top + [(end + w * 0.04, Y(0.54))] + list(reversed(bot))
-    mask = Image.new("L", (w, h), 0)
-    ImageDraw.Draw(mask).polygon(panel, fill=255)
-    # 切っ先近くの炎のすじも模様に含める
-    for _ in range(9):
-        xs = w * rng.uniform(0.78, 0.90)
-        ln = w * rng.uniform(0.04, 0.09)
-        v = rng.uniform(0.40, 0.66)
-        th = h * rng.uniform(0.04, 0.08)
-        ImageDraw.Draw(mask).polygon([(xs, Y(v) - th / 2), (xs + ln, Y(v + 0.05)), (xs, Y(v) + th / 2)], fill=255)
-    mask = blur(mask, 0.8)
-    # 内側ほど少し明るいグラデーション
-    inner = blur(mask, 10).point(lambda a: max(0, a - 140) * 255 // 115)
-    panel_img = Image.composite(Image.new("RGB", (w, h), PANEL_LIGHT), Image.new("RGB", (w, h), PANEL),
-                                inner.point(lambda a: a * 0.45))
-    img.paste(panel_img, (0, 0), mask)
+    hard = Image.new("L", (w, h), 0)
+    hd = ImageDraw.Draw(hard)
+    hd.polygon(panel, fill=255)
+    for _ in range(8):  # 切っ先近くで模様がほどけた炎のすじ (なめらかな細い舌)
+        xs, ln = w * rng.uniform(0.78, 0.88), w * rng.uniform(0.05, 0.10)
+        v, th = rng.uniform(0.42, 0.64), h * rng.uniform(0.03, 0.06)
+        tongue = []
+        for k in range(17):
+            t = k / 16
+            tongue.append((xs + ln * t, Y(v + 0.04 * t * t) - th / 2 * (1 - t) ** 1.3))
+        for k in range(16, -1, -1):
+            t = k / 16
+            tongue.append((xs + ln * t, Y(v + 0.04 * t * t) + th / 2 * (1 - t) ** 1.3))
+        hd.polygon(tongue, fill=255)
+    mask = blur(hard, 1.0)
 
-    # 模様の中の流れる筋 (濃い筋と明るい筋)
-    streak = Image.new("L", (w, h), 0)
-    sd = ImageDraw.Draw(streak)
-    for k in range(9):
-        v = 0.36 + 0.045 * k
+    # 模様の外側の光のにじみ (ハロー)
+    halo = ImageChops.subtract(blur(hard, 22), hard)
+    img.paste((226, 176, 255), (0, 0), halo.point(lambda a: min(255, a * 1.4)))
+
+    # 模様の中: 中心は深い紫、縁ほど明るく光る宝石のようなグラデーション
+    depth = blur(hard, 16).point(lambda a: max(0, a - 128) * 2)
+    core = Image.composite(Image.new("RGB", (w, h), (108, 66, 222)), Image.new("RGB", (w, h), (192, 156, 252)), depth)
+    # 模様の中をゆっくり流れる光の帯 (シルクのような)
+    silk = Image.new("L", (w, h), 0)
+    sd = ImageDraw.Draw(silk)
+    for k in range(6):
+        v = 0.40 + 0.05 * k
         ph = rng.uniform(0, math.tau)
-        pts = [(x, Y(v + 0.035 * math.sin(x / w * 18 + ph))) for x in range(int(start), int(end), int(6 * F))]
-        sd.line(pts, fill=255, width=int(rng.randint(5, 12) * F))
-    streak = blur(ImageChops.multiply(streak, mask), 3)
-    img.paste(PANEL_DARK, (0, 0), streak.point(lambda a: a * 0.65))
-    light = Image.new("L", (w, h), 0)
-    ld = ImageDraw.Draw(light)
-    for k in range(5):
-        v = 0.40 + 0.07 * k
-        ph = rng.uniform(0, math.tau)
-        pts = [(x, Y(v + 0.03 * math.sin(x / w * 23 + ph))) for x in range(int(start), int(end), int(6 * F))]
-        ld.line(pts, fill=255, width=int(3 * F))
-    light = blur(ImageChops.multiply(light, mask), 1.2)
-    img.paste(PANEL_LIGHT, (0, 0), light)
+        pts = [(x, Y(v + 0.05 * math.sin(x / w * 11 + ph) + 0.02 * math.sin(x / w * 37 + ph)))
+               for x in range(int(start), int(end), int(8 * F))]
+        sd.line(pts, fill=255, width=int(rng.uniform(10, 22) * F))
+    silk = blur(silk, 8)
+    core.paste((206, 176, 255), (0, 0), silk.point(lambda a: a * 0.35))
+    img.paste(core, (0, 0), mask)
+    # 縁の内側の光るライン
+    rim = ImageChops.subtract(hard, blur(hard, 3).point(lambda a: 255 if a > 240 else 0))
+    rim = blur(rim, 0.8)
+    img.paste((238, 214, 255), (0, 0), rim)
 
-    # 模様の縁取り: 外側に濃い細線、内側に明るい細線
-    edge_out = ImageChops.subtract(blur(mask, 2.5).point(lambda a: 255 if a > 20 else 0), mask.point(lambda a: 255 if a > 128 else 0))
-    edge_in = ImageChops.subtract(mask.point(lambda a: 255 if a > 128 else 0), blur(mask, 2.5).point(lambda a: 255 if a > 235 else 0))
-    img.paste(PANEL_DARK, (0, 0), blur(edge_out, 0.6))
-    img.paste(PANEL_LIGHT, (0, 0), blur(edge_in, 0.6).point(lambda a: a * 0.8))
+    # 稲妻: 模様の中を走る、枝分かれする細い光の筋
+    bolt = Image.new("L", (w, h), 0)
+    bd = ImageDraw.Draw(bolt)
+    x = start + w * 0.03
+    while x < end - w * 0.08:
+        L = w * rng.uniform(0.07, 0.14)
+        va, vb = rng.uniform(0.44, 0.62), rng.uniform(0.44, 0.62)
+        lightning(bd, (x, Y(va)), (x + L, Y(vb)), rng, 2.2 * F)
+        x += L * rng.uniform(0.6, 1.0)
+    bolt = ImageChops.multiply(bolt, hard)
+    bolt_glow = blur(bolt, 5)
+    img.paste((214, 180, 255), (0, 0), bolt_glow.point(lambda a: min(255, a * 2)))
+    img.paste((250, 244, 255), (0, 0), blur(bolt, 0.6))
 
-    # 根元: 紋のまわりは深い紫
+    # 星屑: 刀身全体に薄く、模様の中は多め
+    dust_all = stardust((w, h), rng, 900, 30)
+    dust_in = stardust((w, h), rng, 1400, 70, area=hard)
+    dust = ImageChops.lighter(dust_all.point(lambda a: a * 0.6), dust_in)
+    img.paste((255, 250, 255), (0, 0), ImageChops.lighter(blur(dust, 0.5), blur(dust, 3).point(lambda a: a * 0.5)))
+
+    # 根元: 紋のまわりは深い紫のグラデーション
     base = Image.new("L", (w, h), 0)
     ImageDraw.Draw(base).rectangle([0, Y(0.95), w * 0.07, Y(0.05)], fill=255)
-    img.paste(DEEP, (0, 0), blur(base, 20).point(lambda a: a * 0.55))
-
-    img = Image.blend(img, blur(img, 3), 0.18)       # ほんの少しにじませて光っている感じに
-
-    # 発光: 地は控えめ、刃文と沸は明るく、模様は少し抑える
-    emis = scale_rgb(img, 0.32)
-    emis.paste(scale_rgb(Image.new("RGB", (w, h), EDGE_WHITE), 0.85), (0, 0), hm_soft.point(lambda a: a * 0.7))
-    emis.paste(GLOW_WHITE, (0, 0), blur(nie, 0.6))
-    emis.paste(scale_rgb(Image.new("RGB", (w, h), PANEL), 0.6), (0, 0), mask.point(lambda a: a * 0.6))
+    img.paste(DEEP, (0, 0), blur(base, 24).point(lambda a: a * 0.6))
     img.paste(GLOW_WHITE, (0, 0), blur(nie, 0.6).point(lambda a: a * 0.6))
+
+    # 発光: 地はほのかに、模様の縁・稲妻・星屑・刃文は強く
+    # 地はピンク寄りの薄紫にほのかに光る (白っぽく濁らないよう色を乗せる)
+    emis = scale_rgb(ImageChops.multiply(img, Image.new("RGB", (w, h), (215, 165, 255))), 0.40)
+    emis.paste(scale_rgb(core, 0.45), (0, 0), mask)
+    emis.paste((150, 96, 230), (0, 0), halo.point(lambda a: a * 0.7))
+    emis.paste((236, 210, 255), (0, 0), rim)
+    emis.paste(scale_rgb(Image.new("RGB", (w, h), EDGE_WHITE), 0.8), (0, 0), hm_soft.point(lambda a: a * 0.6))
+    emis.paste((200, 160, 255), (0, 0), bolt_glow.point(lambda a: min(255, a * 2)))
+    emis.paste(GLOW_WHITE, (0, 0), blur(bolt, 0.6))
+    emis.paste(GLOW_WHITE, (0, 0), ImageChops.lighter(blur(dust, 0.5), blur(nie, 0.6)))
     maps.put(UV_BLADE, img, emis)
 
-    # 凹凸: 模様はわずかに彫り込み (はめ込み細工)、縁は溝、地肌はごく細かいムラ
-    maps.bump(UV_BLADE, mask, -0.05)
-    maps.bump(UV_BLADE, blur(edge_out, 1.0), -0.04)
-    maps.noise(UV_BLADE, 0.012, 3 * F)
+    # 凹凸: 模様はなめらかにわずか彫り込み (はめ込み細工)
+    maps.bump(UV_BLADE, blur(hard, 2.5), -0.04)
+    maps.noise(UV_BLADE, 0.006, 3 * F)
 
 
 # ---------------------------------------------------------------- 柄
 def draw_handle(maps):
     x0, y0, x1, y1 = uv_box(UV_HANDLE)
     w, h = x1 - x0, y1 - y0
-    img = seamless_v(marble((w, h), WRAP_DARK, WRAP_LIGHT))
-    # マーブルの中の細い明るい筋 (雲のような流れ)
+    # 星雲のような柔らかい紫 (大きくゆっくりした雲 + 星のきらめき)
     rng = random.Random(23)
-    veins = Image.new("L", (w, h), 0)
-    vd = ImageDraw.Draw(veins)
-    for _ in range(40):
-        xs, ys = rng.uniform(0, w), rng.uniform(0, h)
-        pts = []
-        a = rng.uniform(0, math.tau)
-        for i in range(30):
-            a += rng.uniform(-0.35, 0.35)
-            xs += math.cos(a) * 18 * F
-            ys += math.sin(a) * 18 * F
-            pts.append((xs, ys))
-        vd.line(pts, fill=255, width=int(2 * F))
-    img.paste(WRAP_LIGHT, (0, 0), seamless_v(blur(veins, 1.5)).point(lambda a: a * 0.5))
+    clouds = marble((w, h), (58, 34, 146), (150, 116, 236), scale=150)
+    glow = hgradient((w, h), [(0.0, (255, 255, 255)), (0.5, (232, 226, 246)), (1.0, (214, 204, 238))])
+    img = seamless_v(ImageChops.multiply(clouds, glow))
+    img = Image.blend(img, blur(img, 12), 0.5)
+    stars = seamless_v(stardust((w, h), rng, 700, 25))
+    img.paste((236, 222, 255), (0, 0), ImageChops.lighter(blur(stars, 0.5), blur(stars, 3).point(lambda a: a * 0.5)))
 
     # 銀の組紐: 斜めに交差する帯 (縦方向に一周するので上下でつながる)
     period = w / 9
@@ -348,8 +409,9 @@ def draw_handle(maps):
         st = stripes((w, h), band_dir + sgn * 30, 7 * F, sharp=1.5)     # 帯を斜めに横切る縞
         weave.append(ImageChops.multiply(st, m))
     weave_all = ImageChops.lighter(*weave)
-    silver = Image.composite(Image.new("RGB", (w, h), SILVER_DARK), Image.new("RGB", (w, h), SILVER),
-                             weave_all.point(lambda a: a * 0.55))
+    # 真珠のような銀: 長さ方向に淡いピンクと水色がゆらぐ
+    pearl = hgradient((w, h), [(i / 18, ((244, 230, 252), (228, 236, 254), (240, 226, 250))[i % 3]) for i in range(19)])
+    silver = Image.composite(Image.new("RGB", (w, h), SILVER_DARK), pearl, weave_all.point(lambda a: a * 0.5))
     img.paste(silver, (0, 0), band)
     # 交差点は上を通る帯を少し明るく
     cross = ImageChops.multiply(*masks)
@@ -405,16 +467,25 @@ def draw_white(maps):
 
 
 def draw_tsuba(maps):
+    """真珠のような光沢の鍔。内側に淡く光る線、縁に彫りの二重線。"""
     x0, y0, x1, y1 = uv_box(UV_TSUBA)
     w, h = x1 - x0, y1 - y0
-    img = vgradient((w, h), [(0.0, (238, 220, 255)), (0.5, GLOW_WHITE), (1.0, (232, 212, 253))])
+    img = ImageChops.multiply(
+        hgradient((w, h), [(0.0, (250, 236, 255)), (0.35, (238, 226, 255)), (0.65, (252, 236, 250)), (1.0, (236, 230, 255))]),
+        vgradient((w, h), [(0.0, (236, 226, 250)), (0.5, (255, 255, 255)), (1.0, (232, 222, 248))]))
     m = Image.new("L", (w, h), 0)
     d = ImageDraw.Draw(m)
     for inset, lw in ((10, 6), (26, 3)):
         d.rectangle([inset * F, inset * F, w - inset * F, h - inset * F], outline=255, width=int(lw * F))
     m = blur(m, 0.8)
-    img.paste((198, 168, 246), (0, 0), m)
-    maps.put(UV_TSUBA, img, scale_rgb(img, 0.85))
+    img.paste((206, 176, 250), (0, 0), m)
+    line = Image.new("L", (w, h), 0)
+    ImageDraw.Draw(line).line([(40 * F, h / 2), (w - 40 * F, h / 2)], fill=255, width=int(4 * F))
+    line = blur(line, 3)
+    img.paste((226, 196, 255), (0, 0), line)
+    emis = scale_rgb(img, 0.8)
+    emis.paste((240, 220, 255), (0, 0), line)
+    maps.put(UV_TSUBA, img, emis)
     maps.bump(UV_TSUBA, m, -0.08)
 
 
@@ -426,21 +497,33 @@ def draw_flame(maps):
 
 
 def draw_fin(maps):
-    """紫のトゲ (横 = 付け根→先端)。中央に明るい筋、縁は明るく。"""
+    """紫のトゲ (横 = 付け根→先端)。付け根は深い紫、先端ほど明るい星雲の色。中央に光る筋、縁は明るく。"""
     x0, y0, x1, y1 = uv_box(UV_FIN)
     w, h = x1 - x0, y1 - y0
-    img = marble((w, h), DEEP, DEEP_LIGHT, scale=20)
-    m = Image.new("L", (w, h), 0)
-    d = ImageDraw.Draw(m)
-    d.line([(0, h * 0.5), (w, h * 0.5)], fill=255, width=int(10 * F))
+    rng = random.Random(41)
+    img = ImageChops.multiply(marble((w, h), (120, 90, 210), (255, 255, 255), scale=60),
+                              hgradient((w, h), [(0.0, (88, 56, 182)), (0.6, (150, 110, 244)), (1.0, (214, 184, 255))]))
+    img = Image.blend(img, blur(img, 6), 0.5)
+    vein = Image.new("L", (w, h), 0)
+    d = ImageDraw.Draw(vein)
+    d.line([(0, h * 0.5), (w, h * 0.5)], fill=255, width=int(8 * F))
     for k in range(6):
         xa = w * (0.1 + 0.14 * k)
-        d.line([(xa, h * 0.5), (xa + w * 0.12, h * 0.15)], fill=255, width=int(4 * F))
-        d.line([(xa, h * 0.5), (xa + w * 0.12, h * 0.85)], fill=255, width=int(4 * F))
-    m = blur(m, 2)
-    img.paste(DEEP_LIGHT, (0, 0), m.point(lambda a: a * 0.7))
-    maps.put(UV_FIN, img, scale_rgb(img, 0.4))
-    maps.bump(UV_FIN, m, 0.10)
+        d.line([(xa, h * 0.5), (xa + w * 0.12, h * 0.18)], fill=255, width=int(3 * F))
+        d.line([(xa, h * 0.5), (xa + w * 0.12, h * 0.82)], fill=255, width=int(3 * F))
+    vein = blur(vein, 2)
+    rim = Image.new("L", (w, h), 0)
+    ImageDraw.Draw(rim).rectangle([0, 0, w - 1, h - 1], outline=255, width=int(14 * F))
+    rim = blur(rim, 6)
+    img.paste((214, 186, 255), (0, 0), vein.point(lambda a: a * 0.8))
+    img.paste((226, 200, 255), (0, 0), rim.point(lambda a: a * 0.6))
+    dust = stardust((w, h), rng, 160, 6)
+    img.paste((255, 250, 255), (0, 0), blur(dust, 0.5))
+    emis = scale_rgb(img, 0.35)
+    emis.paste((214, 180, 255), (0, 0), vein)
+    emis.paste(GLOW_WHITE, (0, 0), blur(dust, 0.5))
+    maps.put(UV_FIN, img, emis)
+    maps.bump(UV_FIN, vein, 0.10)
 
 
 def main():

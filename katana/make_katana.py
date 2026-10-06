@@ -322,8 +322,7 @@ def build_habaki(b):
         hx = th / 2 + grow
         rings.append([p - n * grow + X * hx, p + n * (w + grow) + X * hx * 0.55,
                       p + n * (w + grow) - X * hx * 0.55, p - n * grow - X * hx])
-    b.rings(rings, lambda i, j: map_rect(UV_FIN, j / 4, i), MAT_BLADE,
-            cap_start=lambda co: map_rect(UV_FIN, 0.5, 0.5), cap_end=lambda co: map_rect(UV_FIN, 0.5, 0.5))
+    b.rings(rings, lambda i, j: UV_DARK, MAT_BLADE, cap_start=lambda co: UV_DARK, cap_end=lambda co: UV_DARK)
 
 
 def tomoe_outline(R, rot, sweep=math.radians(100), n=18):
@@ -438,7 +437,7 @@ def build_fittings(b):
     # 縁: 鍔の下の輪 (参考画像どおり濃い紫)
     rx, rn = handle_radius(-0.008)
     rings = [ellipse_ring(t, rx, rn, seg, s) for t, s in ((-0.008, 1.10), (-0.020, 1.08), (-0.022, 1.0))]
-    b.rings(rings, lambda i, j: map_rect(UV_FIN, j / seg, i / 2), MAT_BLADE)
+    b.rings(rings, lambda i, j: UV_DARK, MAT_BLADE)
     # 柄頭: 丸くすぼまる金具
     tE = -HANDLE_LEN
     rx, rn = handle_radius(tE)
