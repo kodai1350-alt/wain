@@ -9,6 +9,10 @@
 
 ![guard](export/preview_guard.png)
 
+柄 (銀の組紐の織り目・金の爪の唐草の彫り):
+
+![grip](export/preview_grip.png)
+
 ## 仕様
 
 | 項目 | 内容 |
@@ -23,22 +27,26 @@
 | 目印 | `Grip` (握る位置、柄の中央) / `Tip` (切っ先)。どちらも Katana の子の空オブジェクト |
 | ポリゴン | 3,260 三角形 |
 | マテリアル | 2 個: `Katana_Blade` (光る部分: 刃・紋・ヒレ・鍔・玉・炎) / `Katana_Hilt` (柄巻き・金具) |
-| テクスチャ | 1 枚 `Katana_Atlas.png` (8192×8192、実用上の最大) を 2 つのマテリアルで共有。FBX には埋め込まず隣に置いています |
+| テクスチャ | 3 枚 (どれも 8192×8192、2 つのマテリアルで共有、FBX には埋め込まず隣に置く): `Katana_Atlas.png` (色) / `Katana_Emission.png` (発光) / `Katana_Normal.png` (ノーマルマップ) |
+| 色 | 参考画像 (ゲーム画面) から拾った色。刀身は白〜ピンク寄りの薄紫、模様は鮮やかな紫、トゲ・紋の台座は深い紫 |
+| 細部 | 刀身: 刃文 (のたれ + 互の目)・匂口・沸のきらめき・地肌・模様の縁取り / 柄: 組紐の織り目・マーブルの筋 / 金具: 唐草の彫り / 鍔: 彫りの二重線 |
+| 発光 | 刃文と沸は強く、刀身の地は控えめ、模様は少し抑えめ。三つ巴・光る玉・柄頭の炎・鍔は強く光る。柄と金具は光らない |
+| 凹凸 | ノーマルマップ: 柄巻きの盛り上がりと織り目、金の彫りの溝、刀身の模様の彫り込みと縁の溝、鍔の彫り、トゲの筋 |
 | 動作確認 | Blender 5.1.2 |
 
 ## ファイル
 
 - `make_katana.py` … Blender で刀を作って FBX に書き出すスクリプト
-- `make_katana_texture.py` … テクスチャ `Katana_Atlas.png` を作るスクリプト (Pillow を使用)
-- `Katana_Atlas.png` … 生成済みのテクスチャ
+- `make_katana_texture.py` … 3 枚のテクスチャを作るスクリプト (Pillow と numpy を使用)
+- `Katana_Atlas.png` / `Katana_Emission.png` / `Katana_Normal.png` … 生成済みのテクスチャ
 - `export/Katana.fbx` … 書き出し済みの FBX (Blender 5.1.2 で作成)
 
 ## Blender での使い方
 
-1. `make_katana.py` と `Katana_Atlas.png` を同じフォルダに置く
+1. `make_katana.py` と 3 枚のテクスチャ (`Katana_Atlas.png` / `Katana_Emission.png` / `Katana_Normal.png`) を同じフォルダに置く
 2. Blender の **Scripting** タブ → **テキスト → 開く** で `make_katana.py` を開く
 3. **▶ (スクリプト実行)** (Alt+P)
-4. シーンに `Katana` / `Grip` / `Tip` ができ、`Katana.fbx` と `Katana_Atlas.png` が書き出されます
+4. シーンに `Katana` / `Grip` / `Tip` ができ、`Katana.fbx` と 3 枚のテクスチャが書き出されます
    (.blend を保存していればそのフォルダ、未保存ならスクリプトのフォルダ)
 
 大きさはスクリプト上部の `SCALE` (全体)、`BLADE_LEN` (刃の長さ)、`HANDLE_LEN` (柄の長さ)、
@@ -47,8 +55,12 @@
 ## Unity に入れるとき
 
 - FBX は「回転 0・スケール 1・1unit = 1m」で読み込まれる設定で書き出しています。
-- `Katana.fbx` と `Katana_Atlas.png` を同じフォルダに入れてください。2 つのマテリアルとも `Katana_Atlas.png` を使います。
-- テクスチャは 8192×8192 です。Unity のテクスチャ設定の **Max Size を 8192** にすると最大の解像度で使えます。
-  ただし VRChat ではテクスチャのメモリが大きくなり (8192 で約 85MB)、パフォーマンスランクが下がります。
-  重いときは Max Size を 4096 (約 21MB) や 2048 (約 5MB) に下げてください (作り直しは不要です)。
-- lilToon で光らせるとき: `Katana_Blade` の **Emission** をオンにして、Emission のテクスチャにも `Katana_Atlas.png` を設定します (柄の `Katana_Hilt` は光らせません)。
+- `Katana.fbx` と 3 枚のテクスチャを同じフォルダに入れてください。
+- `Katana_Normal.png` はテクスチャ設定の **Texture Type を Normal map** にしてください。
+- lilToon の設定 (2 つのマテリアルとも):
+  - メインカラー: `Katana_Atlas.png`
+  - ノーマルマップ: 「ノーマルマップ」をオンにして `Katana_Normal.png`
+  - `Katana_Blade` だけ: 「発光」をオンにして、テクスチャに `Katana_Emission.png`、色は白 (明るさはお好みで)
+- テクスチャはどれも 8192×8192 です。Unity のテクスチャ設定の **Max Size を 8192** にすると最大の解像度で使えます。
+  ただし VRChat ではテクスチャのメモリが大きくなり、パフォーマンスランクが下がります (8192 は 1 枚で約 85MB)。
+  重いときは Max Size を下げてください (作り直しは不要です)。目安: 色 4096、ノーマル 4096、発光 2048。

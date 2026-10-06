@@ -19,7 +19,8 @@ FBX で書き出す Blender スクリプト (Blender 5.1 で動作確認)。
     (刃 80cm・柄 20cm・柄頭の飾り 約 7cm)。参考画像のように刃が柄の約 4 倍の細長いバランス。
     SCALE で全体の大きさを変えられます
   - Unity では刃が上 (Y)、刃先が前 (+Z)。原点は鍔の中心
-  - テクスチャはアトラス 1 枚 (8192x8192) を 2 つのマテリアルで共有。
+  - テクスチャは 3 枚 (どれも 8192x8192、2 つのマテリアルで共有):
+      Katana_Atlas.png (色) / Katana_Emission.png (発光) / Katana_Normal.png (ノーマルマップ)
     FBX には埋め込まず、隣に PNG を置きます (Unity で同じフォルダに入れてください)
 
 テクスチャ Katana_Atlas.png は make_katana_texture.py で作ったものを
@@ -48,7 +49,10 @@ BLADE_W = 0.032        # 刃の幅 (m)。参考画像どおり切っ先近くま
 BLADE_T = 0.0075       # 刃の厚み (付け根, m)
 OUTPUT_DIR = ""        # 空なら: .blend のフォルダ → スクリプトのフォルダ → ホーム の順
 FBX_NAME = "Katana.fbx"
-ATLAS_NAME = "Katana_Atlas.png"
+ATLAS_NAME = "Katana_Atlas.png"          # 色
+EMISSION_NAME = "Katana_Emission.png"    # 発光 (光らせたい所だけ明るい)
+NORMAL_NAME = "Katana_Normal.png"        # ノーマルマップ (凹凸)
+TEXTURES = (ATLAS_NAME, EMISSION_NAME, NORMAL_NAME)
 OBJECT_NAME = "Katana"
 BLADE_MATERIAL = "Katana_Blade"   # 刃・紋・ヒレ・鍔・光る玉・柄頭の炎 (光る)
 HILT_MATERIAL = "Katana_Hilt"     # 柄巻き・金具
@@ -97,10 +101,10 @@ def resolve_output_dir():
     return os.getcwd()
 
 
-def find_atlas():
+def find_texture(name):
     for d in (script_dir(), bpy.path.abspath("//") if bpy.data.filepath else "", cli_out_dir(), OUTPUT_DIR):
-        if d and os.path.isfile(os.path.join(d, ATLAS_NAME)):
-            return os.path.join(d, ATLAS_NAME)
+        if d and os.path.isfile(os.path.join(d, name)):
+            return os.path.join(d, name)
     return ""
 
 
@@ -152,24 +156,29 @@ def center(t):
 
 
 # ---------------------------------------------------------------- テクスチャ・マテリアル
-def load_atlas():
-    path = find_atlas()
-    old = bpy.data.images.get(ATLAS_NAME)
+FALLBACK = {ATLAS_NAME: (0.6, 0.5, 0.95), EMISSION_NAME: (0.0, 0.0, 0.0), NORMAL_NAME: (0.5, 0.5, 1.0)}
+
+
+def load_texture(name):
+    """テクスチャを読み込む。見つからなければ単色の代わりを作る。"""
+    path = find_texture(name)
+    old = bpy.data.images.get(name)
     if old:
         bpy.data.images.remove(old)
     if path:
         img = bpy.data.images.load(path)
-        img.name = ATLAS_NAME
+        img.name = name
         print("[Katana] texture:", path)
     else:
-        img = bpy.data.images.new(ATLAS_NAME, 64, 64, alpha=False)
-        img.pixels = [0.6, 0.5, 0.95, 1.0] * (64 * 64)
-        print("[Katana] texture not found -> plain purple texture")
-    img.pack()
+        img = bpy.data.images.new(name, 64, 64, alpha=False)
+        img.pixels = [*FALLBACK[name], 1.0] * (64 * 64)
+        print("[Katana] texture not found -> plain:", name)
+    if name == NORMAL_NAME:
+        img.colorspace_settings.name = "Non-Color"
     return img
 
 
-def make_material(name, img, roughness, emission):
+def make_material(name, albedo, normal, roughness, emission_img=None, emission=0.0):
     old = bpy.data.materials.get(name)
     if old:
         bpy.data.materials.remove(old)
@@ -179,12 +188,23 @@ def make_material(name, img, roughness, emission):
     nt = mat.node_tree
     bsdf = next(n for n in nt.nodes if n.type == "BSDF_PRINCIPLED")
     tex = nt.nodes.new("ShaderNodeTexImage")
-    tex.image = img
-    tex.location = (-400, 200)
+    tex.image = albedo
+    tex.location = (-500, 300)
     nt.links.new(tex.outputs["Color"], bsdf.inputs["Base Color"])
     bsdf.inputs["Roughness"].default_value = roughness
-    if emission > 0:
-        nt.links.new(tex.outputs["Color"], bsdf.inputs["Emission Color"])
+    # ノーマルマップ (柄巻きの盛り上がり・金の彫り・模様の縁の溝)
+    ntex = nt.nodes.new("ShaderNodeTexImage")
+    ntex.image = normal
+    ntex.location = (-700, -300)
+    nmap = nt.nodes.new("ShaderNodeNormalMap")
+    nmap.location = (-300, -300)
+    nt.links.new(ntex.outputs["Color"], nmap.inputs["Color"])
+    nt.links.new(nmap.outputs["Normal"], bsdf.inputs["Normal"])
+    if emission_img is not None and emission > 0:
+        etex = nt.nodes.new("ShaderNodeTexImage")
+        etex.image = emission_img
+        etex.location = (-500, 0)
+        nt.links.new(etex.outputs["Color"], bsdf.inputs["Emission Color"])
         bsdf.inputs["Emission Strength"].default_value = emission
     return mat
 
@@ -395,10 +415,11 @@ def handle_radius(t):
 
 
 def ellipse_ring(t, rx, rn, seg, scale=1.0):
+    """楕円のリング。継ぎ目 (j=0) は峰側に置いて目立たないようにする。"""
     _, n = frame(t)
     c = center(t)
     return [c + X * (rx * scale * math.cos(a)) + n * (rn * scale * math.sin(a))
-            for a in (math.tau * j / seg for j in range(seg))]
+            for a in (-math.pi / 2 + math.tau * j / seg for j in range(seg))]
 
 
 def build_handle(b):
@@ -478,8 +499,8 @@ def build_talons(b):
             return center(t) - n * (rn - 0.002) + n * bb + X * d
 
         b.prism(outline, to3d, -0.0011, 0.0011,
-                lambda a, bb: map_rect(UV_GOLD, 0.5, 0.5 + bb / 0.03),
-                lambda s_, t_: map_rect(UV_GOLD, s_, t_), MAT_HILT)
+                lambda a, bb: map_rect(UV_GOLD, min(1.0, 0.3 - a / 0.1), min(1.0, max(0.0, 0.5 + bb / 0.07))),
+                lambda s_, t_: map_rect(UV_GOLD, s_, 0.2 + 0.6 * t_), MAT_HILT)
 
 
 def build_mesh():
@@ -536,9 +557,9 @@ def build_scene():
     coll = bpy.context.scene.collection
 
     me, origin = build_mesh()
-    img = load_atlas()
-    me.materials.append(make_material(BLADE_MATERIAL, img, roughness=0.3, emission=1.5))
-    me.materials.append(make_material(HILT_MATERIAL, img, roughness=0.45, emission=0.0))
+    albedo, emis, normal = (load_texture(n) for n in TEXTURES)
+    me.materials.append(make_material(BLADE_MATERIAL, albedo, normal, roughness=0.3, emission_img=emis, emission=1.5))
+    me.materials.append(make_material(HILT_MATERIAL, albedo, normal, roughness=0.45))
     katana = bpy.data.objects.new(OBJECT_NAME, me)
     coll.objects.link(katana)
 
@@ -579,9 +600,11 @@ def export_fbx(katana, empties, out_dir):
         path_mode="STRIP",      # 8K テクスチャは FBX に埋め込まず、ファイル名だけ記録して隣に置く
         embed_textures=False,
     )
-    img = bpy.data.images.get(ATLAS_NAME)
-    if img:  # Unity でマテリアルに設定しやすいよう PNG も隣に保存
-        png = os.path.join(out_dir, ATLAS_NAME)
+    for name in TEXTURES:  # Unity でマテリアルに設定しやすいよう PNG も隣に保存
+        img = bpy.data.images.get(name)
+        if not img:
+            continue
+        png = os.path.join(out_dir, name)
         src = bpy.path.abspath(img.filepath) if img.filepath else ""
         if src and os.path.isfile(src):
             if os.path.abspath(src) != os.path.abspath(png):
