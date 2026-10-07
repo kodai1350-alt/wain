@@ -16,7 +16,7 @@ Blender ではなく通常の Python で実行します:
     v 0.00-0.36 / u 0.00-1.00 : 刃 (横 = 根元→切っ先, 縦 = 刃先→峰)
     v 0.38-0.66 / u 0.00-1.00 : 柄巻き (横 = 鍔側→柄頭, 縦 = 一周)
     v 0.68-0.76 / u 0.00-1.00 : 金具 (金、唐草の彫り)
-    v 0.78-0.98 / u 0.00-0.20 : 三つ巴の紋 (予備)
+    v 0.78-0.98 / u 0.00-0.20 : 刃の付け根の飾り板 (濃い紫と薄い紫の炎の模様。上の余白は側面用の薄紫)
     v 0.78-0.98 / u 0.22-0.30 : 白い光 (三つ巴・光る玉)
     v 0.78-0.98 / u 0.32-0.52 : 鍔
     v 0.78-0.98 / u 0.54-0.64 : 柄頭の炎 (下 = 根元の白 → 上 = 先端の黄色)
@@ -45,7 +45,9 @@ NORMAL_STRENGTH = 20.0
 UV_BLADE = (0.0, 0.0, 1.0, 0.36)
 UV_HANDLE = (0.0, 0.38, 1.0, 0.66)
 UV_GOLD = (0.0, 0.68, 1.0, 0.76)
-UV_EMBLEM = (0.0, 0.78, 0.20, 0.98)
+UV_GUARD = (0.0, 0.78, 0.20, 0.98)     # 刃の付け根の飾り板
+GUARD_TONE = os.path.join(HERE, "guard_tone.png")   # 飾り板の塗り分け (参考画像からなぞったもの)
+GUARD_A_MIN, GUARD_A_MAX, GUARD_E_MIN, GUARD_E_MAX = 0.0016, 0.1040, -0.0345, 0.0491
 UV_WHITE = (0.22, 0.78, 0.30, 0.98)
 UV_TSUBA = (0.32, 0.78, 0.52, 0.98)
 UV_FLAME = (0.54, 0.78, 0.64, 0.98)
@@ -460,6 +462,49 @@ def draw_gold(maps):
 
 
 # ---------------------------------------------------------------- 小物
+def draw_guard(maps):
+    """刃の付け根の飾り板。guard_tone.png (1 = 薄い紫, 2 = 濃い紫, 3 = 白い巴の下) を幻想的な配色で描く。"""
+    x0, y0, x1, y1 = uv_box(UV_GUARD)
+    S = x1 - x0
+    span = max(GUARD_A_MAX - GUARD_A_MIN, GUARD_E_MAX - GUARD_E_MIN)
+    w = round(S * (GUARD_A_MAX - GUARD_A_MIN) / span)
+    h = round(S * (GUARD_E_MAX - GUARD_E_MIN) / span)
+    rng = random.Random(53)
+    light_col = (184, 142, 244)
+    img = Image.new("RGB", (S, S), light_col)             # 余白 (側面) は薄紫
+    emis = scale_rgb(img, 0.32)
+    if os.path.isfile(GUARD_TONE):
+        tone = Image.open(GUARD_TONE).convert("L").resize((w, h), Image.NEAREST)
+        dark = tone.point(lambda v: 255 if 120 <= v < 200 else 0)
+        dark = blur(dark, 4).point(lambda a: 255 if a > 127 else 0)    # 濃い紫の形をなめらかに
+        dark = blur(dark, 0.8)
+        # 薄い紫: 桜色寄りのグラデーション / 濃い紫: 星雲のような深い紫
+        # 薄い紫は白い巴より一段濃く (巴が浮き立つように)
+        lt = vgradient((w, h), [(0.0, (198, 156, 248)), (1.0, (172, 128, 240))])
+        dk = ImageChops.multiply(marble((w, h), (120, 90, 210), (255, 255, 255), scale=40),
+                                 Image.new("RGB", (w, h), (98, 64, 196)))
+        dk = Image.blend(dk, blur(dk, 4), 0.5)
+        part = lt.copy()
+        halo = ImageChops.subtract(blur(dark, 10), dark)     # 濃い紫のまわりの光のにじみ
+        part.paste((206, 168, 252), (0, 0), halo.point(lambda a: a * 0.6))
+        part.paste(dk, (0, 0), dark)
+        dust = stardust((w, h), rng, 260, 10, area=dark)
+        part.paste((250, 240, 255), (0, 0), blur(dust, 0.5))
+        # 上下反転なし: tone の上 = e の大きい側 (刃側) = UV の上
+        img.paste(part, (0, S - h))
+        e_part = scale_rgb(part, 0.32)
+        e_part.paste(scale_rgb(dk, 0.30), (0, 0), dark)
+        e_part.paste((150, 100, 230), (0, 0), halo.point(lambda a: a * 0.6))
+        e_part.paste(GLOW_WHITE, (0, 0), blur(dust, 0.5))
+        emis.paste(e_part, (0, S - h))
+        full_dark = Image.new("L", (S, S), 0)
+        full_dark.paste(dark, (0, S - h))
+        maps.put(UV_GUARD, img, emis)
+        maps.bump(UV_GUARD, blur(full_dark, 2), -0.05)    # 濃い紫は彫り込んだように
+    else:
+        maps.put(UV_GUARD, img, emis)
+
+
 def draw_white(maps):
     x0, y0, x1, y1 = uv_box(UV_WHITE)
     img = Image.new("RGB", (x1 - x0, y1 - y0), GLOW_WHITE)
@@ -531,6 +576,7 @@ def main():
     draw_blade(maps)
     draw_handle(maps)
     draw_gold(maps)
+    draw_guard(maps)
     draw_white(maps)
     draw_tsuba(maps)
     draw_flame(maps)
