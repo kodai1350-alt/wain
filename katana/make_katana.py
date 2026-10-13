@@ -7,7 +7,7 @@ FBX で書き出す Blender スクリプト (Blender 5.1 で動作確認)。
   B) コマンドライン:  blender -b -P make_katana.py -- --out <出力フォルダ>
 
 作成されるもの:
-  - Katana : 刀本体 (刃・付け根の飾り板と白い巴・鍔・柄・鋲を 1 メッシュ)
+  - Katana : 刀本体 (刃・付け根の飾り板と白い巴・鍔・柄・鋲・赤い紐を 1 メッシュ)
       マテリアル 2 個: Katana_Blade (光る部分) / Katana_Hilt (鍔・柄)
   - Grip   : 握る位置の目印 (空のオブジェクト、Katana の子)
   - Tip    : 切っ先の目印 (空のオブジェクト、Katana の子)
@@ -16,7 +16,7 @@ FBX で書き出す Blender スクリプト (Blender 5.1 で動作確認)。
 仕様:
   - 刃の反りは参考画像 (ゲーム画面) を測って合わせています
   - 刃の付け根の飾り板 (トゲ・巻き・抜け) と白い巴のかけら、金色の楕円の鍔、柄 (飾り板のトゲ・
-    金の線・赤い柄巻きと菱形の窓・鋲・柄頭) は、参考画像 (コスプレ用の刀の写真) を測ってなぞった形
+    金の線・X 字に巻いた赤い紐・鋲・柄頭) は、参考画像 (コスプレ用の刀の写真) を測ってなぞった形
   - VRChat のアバター (身長 1.4〜1.6m 前後) に合わせた大きさ: 全長 約 1.04m
     (刃 80cm・柄 24cm)。SCALE で全体の大きさを変えられます
   - Unity では刃が上 (Y)、刃先が前 (+Z)。原点は鍔の中心
@@ -58,6 +58,11 @@ TEXTURES = (ATLAS_NAME, EMISSION_NAME, NORMAL_NAME)
 TSUBA_SIZE = (0.112, 0.084)   # (峰〜刃の方向, 厚みの方向) の直径 (m)
 TSUBA_T = 0.0055              # 鍔の厚み (m)
 TSUBA_OFFSET = -0.004         # 刃の幅の中心から峰側へずらす量 (m, 写真では峰側が少し長い)
+# 柄に巻いた赤い紐 (参考画像の写真を測った位置)
+CORD_R = 0.0018               # 紐の太さ (半径, m)
+CORD_U0 = 0.366               # 表の最初の X の位置 (柄の 0 = 鍔の裏 → 1 = 柄頭)
+CORD_PITCH_U = 0.086          # X の間隔 (= 1 巻きで進む長さ)
+CORD_CROSSINGS = 3            # 表の X の数
 OBJECT_NAME = "Katana"
 BLADE_MATERIAL = "Katana_Blade"   # 刃・付け根の飾り板・白い巴 (光る)
 HILT_MATERIAL = "Katana_Hilt"     # 鍔・柄・鋲 (光らない)
@@ -68,7 +73,8 @@ UV_HANDLE = (0.0, 0.38, 1.0, 0.66)    # 柄 (横 = 鍔側→柄頭, 縦 = 一周
 UV_GUARD = (0.0, 0.78, 0.20, 0.98)    # 刃の付け根の飾り板 (濃い紫と薄い紫の炎の模様)
 UV_WHITE = (0.22, 0.78, 0.30, 0.98)
 UV_TSUBA = (0.32, 0.78, 0.52, 0.98)
-UV_STUD = (0.54, 0.78, 0.64, 0.98)     # 柄の薄紫の鋲
+UV_STUD = (0.54, 0.78, 0.64, 0.98)     # 柄の白い鋲
+UV_CORD = (0.66, 0.78, 0.76, 0.98)     # 柄に巻いた赤い紐 (横 = 紐の一周, 縦 = 紐の長さ)
 UV_PAD = 0.002
 
 # 飾り板の模様の範囲 (make_katana_texture.py と一致させる)。UV_GUARD の中に
@@ -424,7 +430,7 @@ def handle_point(u, a, lift=0.0):
 
 def build_handle(b):
     """柄: 参考画像の写真の輪郭を測った断面 (鍔の近くの 2 枚の飾り板のトゲ・刃側の張り出し、
-    少し太くなる柄頭と峰側の小さな鉤) を楕円のリングでつなぐ。模様 (金の線・赤い柄巻き) はテクスチャ。"""
+    少し太くなる柄頭と峰側の小さな鉤) を楕円のリングでつなぐ。模様 (金の線) はテクスチャ、赤い紐は build_cords。"""
     seg = 18
     rows = []
     for u, *_ in HANDLE_RINGS:
@@ -440,7 +446,7 @@ def build_handle(b):
 
 
 def build_studs(b):
-    """鍔の近くの飾り板にある、薄紫の丸い鋲 (表と裏に 2 つずつ)。"""
+    """鍔の近くの飾り板にある、白い丸い鋲 (表と裏に 2 つずつ)。"""
     r, hgt, seg = 0.0030, 0.0021, 8
     for u, deg in HANDLE_STUDS:
         for a in (math.radians(deg), math.pi - math.radians(deg)):     # 表と、裏 (左右対称)
@@ -461,6 +467,33 @@ def build_studs(b):
             b.rings(rings, uv_of, MAT_HILT, cap_end=base + nrm * (hgt + 0.0008))
 
 
+def build_cords(b):
+    """柄の中ほどに巻いた赤い紐 (参考画像の写真どおり、表と裏に X 字の交差ができる 2 本の逆巻きのらせん)。"""
+    r, sides, steps = CORD_R, 6, 16                     # 紐の太さ・断面の角数・一周あたりの区切り
+    turns = CORD_CROSSINGS                               # 表の交差の数 = 巻き数
+    for sgn in (1, -1):                                  # 右巻きと左巻き
+        n = steps * turns + 1
+        a0, a1 = -math.pi, math.tau * (turns - 1) + math.pi
+        pts = []
+        for i in range(n):
+            a = lerp(a0, a1, i / (n - 1))
+            u = CORD_U0 + CORD_PITCH_U * a / math.tau
+            if sgn < 0:                                  # 逆巻き: 同じ範囲を反対向きに回る
+                u = CORD_U0 + CORD_PITCH_U * (turns - 1) - CORD_PITCH_U * a / math.tau
+            p, nrm = handle_point(u, a, r * 0.55)
+            pts.append((p, nrm))
+        rings = []
+        for i, (p, nrm) in enumerate(pts):
+            q0, q1 = pts[max(0, i - 1)][0], pts[min(len(pts) - 1, i + 1)][0]
+            tan = (q1 - q0).normalized()
+            nn = (nrm - tan * nrm.dot(tan)).normalized()
+            bn = tan.cross(nn)
+            rings.append([p + (nn * math.cos(f) + bn * math.sin(f)) * r for f in (math.tau * k / sides for k in range(sides))])
+        L = len(rings) - 1
+        b.rings(rings, lambda i, j: map_rect(UV_CORD, j / sides, i / L), MAT_HILT,
+                cap_start=pts[0][0] - pts[0][1] * r * 0.5, cap_end=pts[-1][0] - pts[-1][1] * r * 0.5)
+
+
 def build_mesh():
     b = Builder()
     build_blade(b)
@@ -468,6 +501,7 @@ def build_mesh():
     build_tsuba(b)
     build_handle(b)
     build_studs(b)
+    build_cords(b)
     bm = b.bm
 
     # へこんだ多角形も正しく三角形にする (Unity での読み込みを安定させる)
