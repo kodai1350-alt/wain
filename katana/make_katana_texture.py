@@ -10,18 +10,17 @@ Blender ではなく通常の Python で実行します:
     pip install pillow numpy
     python make_katana_texture.py
 
-色は参考画像 (ゲーム画面) から拾っています。
+刃の色は参考画像 (ゲーム画面) から、鍔・柄は参考画像 (コスプレ用の刀の写真) から拾っています。
+刃の付け根の飾り板は guard_tone.png、柄の模様は handle_tone.png (どちらも写真からなぞった塗り分け) を使います。
 
 アトラスのレイアウト (UV は左下原点):
     v 0.00-0.36 / u 0.00-1.00 : 刃 (横 = 根元→切っ先, 縦 = 刃先→峰)
-    v 0.38-0.66 / u 0.00-1.00 : 柄巻き (横 = 鍔側→柄頭, 縦 = 一周)
-    v 0.68-0.76 / u 0.00-1.00 : 金具 (金、唐草の彫り)
+    v 0.38-0.66 / u 0.00-1.00 : 柄 (横 = 鍔側→柄頭, 縦 = 一周。紫の地・金の線・赤い柄巻き)
     v 0.78-0.98 / u 0.00-0.20 : 刃の付け根の飾り板 (濃い紫と薄い紫の炎の模様。上の余白は側面用の薄紫)
-    v 0.78-0.98 / u 0.22-0.30 : 白い光 (三つ巴・光る玉)
-    v 0.78-0.98 / u 0.32-0.52 : 鍔
-    v 0.78-0.98 / u 0.54-0.64 : 柄頭の炎 (下 = 根元の白 → 上 = 先端の黄色)
-    v 0.78-0.98 / u 0.66-0.86 : 紫のトゲ
-    それ以外                    : 濃い紫 (紋の台座・鎺・縁)
+    v 0.78-0.98 / u 0.22-0.30 : 白い光 (白い巴)
+    v 0.78-0.98 / u 0.32-0.52 : 鍔 (金色の楕円の面)
+    v 0.78-0.98 / u 0.54-0.64 : 柄の薄紫の鋲
+    それ以外                    : 濃い紫 (使っていない)
 make_katana.py の UV 割り当てはこのレイアウトに合わせてあります。
 """
 
@@ -44,14 +43,19 @@ NORMAL_STRENGTH = 20.0
 
 UV_BLADE = (0.0, 0.0, 1.0, 0.36)
 UV_HANDLE = (0.0, 0.38, 1.0, 0.66)
-UV_GOLD = (0.0, 0.68, 1.0, 0.76)
 UV_GUARD = (0.0, 0.78, 0.20, 0.98)     # 刃の付け根の飾り板
 GUARD_TONE = os.path.join(HERE, "guard_tone.png")   # 飾り板の塗り分け (参考画像からなぞったもの)
 GUARD_A_MIN, GUARD_A_MAX, GUARD_E_MIN, GUARD_E_MAX = 0.0016, 0.1040, -0.0345, 0.0491
 UV_WHITE = (0.22, 0.78, 0.30, 0.98)
 UV_TSUBA = (0.32, 0.78, 0.52, 0.98)
-UV_FLAME = (0.54, 0.78, 0.64, 0.98)
-UV_FIN = (0.66, 0.78, 0.86, 0.98)
+UV_STUD = (0.54, 0.78, 0.64, 0.98)
+# 柄 (make_katana.py の HANDLE_RINGS と一致させる)。参考画像の写真を柄に沿ってまっすぐにした座標 (px) で配置
+HANDLE_TONE = os.path.join(HERE, "handle_tone.png")   # 柄の塗り分け (写真からなぞったもの)
+HANDLE_S0, HANDLE_S1 = 8.2, 363.5      # 柄の始まり (鍔の裏) と柄頭
+WRAP_S0, WRAP_PERIOD = 144.0, 36.0     # 柄巻きの組紐が表の中央で交差する位置と間隔
+WRAP_WINDOWS = ((0, 0), (1, 1), (2, -2), (3, -1))   # 紫がのぞく菱形の窓 (表に 2 つ, 裏に 2 つ)
+WIN_HALF_S, WIN_HALF_V = 7.5, 0.105   # 窓の大きさの半分 (長さ方向 px, 一周に対して)。写真では縦長の菱形
+INLAY_S, INLAY_V = 333.0, 0.21         # 柄頭の薄紫の象眼
 
 # 色 (参考画像のゲーム画面から)
 EDGE_WHITE = (252, 240, 255)     # 刃先・刃文
@@ -62,14 +66,11 @@ PANEL_DARK = (124, 86, 226)
 PANEL_LIGHT = (205, 170, 250)
 DEEP = (88, 59, 181)             # トゲ・紋の台座・鎺 (深い紫)
 DEEP_LIGHT = (157, 117, 245)
-WRAP_DARK = (70, 48, 158)        # 柄のマーブル
-WRAP_LIGHT = (142, 112, 226)
-SILVER = (230, 224, 240)         # 柄巻きの銀の組紐
-SILVER_DARK = (150, 142, 178)
+HANDLE_PURPLE = (100, 60, 150)    # 柄の地 (つやのある深い紫)
+WRAP_RED = (206, 34, 46)         # 柄巻きの赤い組紐
+GOLD_PIPE = ((118, 78, 30), (194, 148, 70), (236, 202, 124))   # 柄の金の線 (ふち → 中 → 明るい中央)
 GLOW_WHITE = (255, 250, 255)
-GOLD_STOPS = [(0.0, (250, 226, 150)), (0.4, (214, 170, 82)), (0.6, (160, 116, 44)), (1.0, (236, 200, 120))]
-GOLD_ENGRAVE = (128, 88, 30)
-GOLD_SHINE = (255, 240, 184)
+TSUBA_GOLD = [(0.0, (112, 76, 30)), (0.35, (176, 134, 64)), (0.55, (214, 172, 92)), (0.8, (244, 210, 136)), (1.0, (255, 238, 186))]
 
 random.seed(37)
 
@@ -377,88 +378,129 @@ def draw_blade(maps):
 
 
 # ---------------------------------------------------------------- 柄
+def soft_mask(small, size, r=2.0):
+    """低い解像度の 0/255 マスクを拡大して、なめらかな輪郭にする。"""
+    m = small.resize(size, Image.BILINEAR)
+    m = blur(m, r).point(lambda a: 255 if a > 127 else 0)
+    return blur(m, 0.7)
+
+
 def draw_handle(maps):
+    """柄。handle_tone.png (参考画像の写真から: 0 = 紫, 80 = 金の線, 160 = 赤い柄巻き) をもとに描く。
+    横 = 鍔側 → 柄頭 (u)、縦 = 一周 (下から 0 = 峰, 0.25 = 表, 0.5 = 刃側, 0.75 = 裏)。"""
     x0, y0, x1, y1 = uv_box(UV_HANDLE)
     w, h = x1 - x0, y1 - y0
-    # 星雲のような柔らかい紫 (大きくゆっくりした雲 + 星のきらめき)
     rng = random.Random(23)
-    clouds = marble((w, h), (58, 34, 146), (150, 116, 236), scale=150)
-    glow = hgradient((w, h), [(0.0, (255, 255, 255)), (0.5, (232, 226, 246)), (1.0, (214, 204, 238))])
-    img = seamless_v(ImageChops.multiply(clouds, glow))
-    img = Image.blend(img, blur(img, 12), 0.5)
-    stars = seamless_v(stardust((w, h), rng, 700, 25))
-    img.paste((236, 222, 255), (0, 0), ImageChops.lighter(blur(stars, 0.5), blur(stars, 3).point(lambda a: a * 0.5)))
+    tone = Image.open(HANDLE_TONE).convert("L") if os.path.isfile(HANDLE_TONE) else Image.new("L", (64, 64), 0)
+    gold = soft_mask(tone.point(lambda v: 255 if 40 <= v < 120 else 0), (w, h))
+    red = soft_mask(tone.point(lambda v: 255 if 120 <= v < 200 else 0), (w, h), 1.0)
 
-    # 銀の組紐: 斜めに交差する帯 (縦方向に一周するので上下でつながる)
-    period = w / 9
-    band_w = int(h * 0.075)
-    masks = []
-    for sgn in (1, -1):
-        m = Image.new("L", (w, h * 3), 0)
-        d = ImageDraw.Draw(m)
-        for k in range(-12, 22):
-            xa = k * period
-            d.line([(xa, 0), (xa + sgn * period * 3, h * 3)], fill=255, width=band_w)
-        # 柄の継ぎ目は峰側にあるので、正面 (UV の 1/4 周) で X 字に交差するよう 1/4 周ずらす
-        masks.append(ImageChops.offset(m.crop((0, h, w, h * 2)), 0, -(h // 4)))
-    band = ImageChops.lighter(*masks)
-    # 帯の影 (柄の地に落ちる)
-    img.paste(WRAP_DARK, (0, 0), blur(ImageChops.offset(band, int(3 * F), int(4 * F)), 3).point(lambda a: a * 0.6))
-    # 組紐の織り目: 帯の向きに対して斜めに細かい縞
-    weave = []
-    for sgn, m in zip((1, -1), masks):
-        band_dir = math.degrees(math.atan2(h * 3, sgn * period * 3))   # 帯の向き
-        st = stripes((w, h), band_dir + sgn * 30, 7 * F, sharp=1.5)     # 帯を斜めに横切る縞
-        weave.append(ImageChops.multiply(st, m))
-    weave_all = ImageChops.lighter(*weave)
-    # 真珠のような銀: 長さ方向に淡いピンクと水色がゆらぐ
-    pearl = hgradient((w, h), [(i / 18, ((244, 230, 252), (228, 236, 254), (240, 226, 250))[i % 3]) for i in range(19)])
-    silver = Image.composite(Image.new("RGB", (w, h), SILVER_DARK), pearl, weave_all.point(lambda a: a * 0.5))
-    img.paste(silver, (0, 0), band)
-    # 交差点は上を通る帯を少し明るく
-    cross = ImageChops.multiply(*masks)
-    img.paste(GLOW_WHITE, (0, 0), blur(cross, 1).point(lambda a: a * 0.25))
+    def X(s):   # 写真の長さ (px) → 列
+        return (s - HANDLE_S0) / (HANDLE_S1 - HANDLE_S0) * w
+
+    def Y(v):   # 一周の位置 → 行 (上が v = 1)
+        return (1 - v) * h
+
+    # 紫の地: つやのある深い紫 (ごく淡いマーブル)
+    img = ImageChops.multiply(marble((w, h), (150, 120, 220), (255, 255, 255), scale=90), Image.new("RGB", (w, h), HANDLE_PURPLE))
+    img = seamless_v(Image.blend(img, blur(img, 10), 0.6))
+
+    # ---- 赤い柄巻き: 斜めに交差する組紐 (菱形の目)。表と裏の中央に、紫がのぞく菱形の窓が 2 つずつ
+    hv = 0.125                       # 菱形の高さの半分 (一周に対して)
+    m = hv / (WRAP_PERIOD / 2)       # 組紐の傾き (一周 / 写真 px)
+    xa, xb = int(X(WRAP_S0 - 20)), int(X(WRAP_S0 + 4 * WRAP_PERIOD + 20))   # 柄巻きのあたりだけ計算する
+    yy, xx = np.mgrid[0:h, xa:xb].astype(np.float32)
+    S = HANDLE_S0 + xx / w * (HANDLE_S1 - HANDLE_S0)
+    V = 1 - yy / h
+    p = (S - WRAP_S0) + (V - 0.25) / m
+    q = (S - WRAP_S0) - (V - 0.25) / m
+    del S, V, yy, xx
+    fp, fq = p / WRAP_PERIOD, q / WRAP_PERIOD
+    ci, cj = np.floor(fp), np.floor(fq)
+    edge = np.maximum(np.abs(fp - ci - 0.5), np.abs(fq - cj - 0.5))   # 目のふちほど 0.5
+    fam = ((ci + cj) % 2 == 0)                                   # 組紐の向き (交互)
+    # 絹糸の細かい筋 (組紐の向きに沿って)
+    thread = np.where(fam, np.sin(fp * math.tau * 14), np.sin(fq * math.tau * 14)) * 0.5 + 0.5
+    del p, q, fp, fq, ci, cj, fam
+    bulge = np.clip(1 - (edge / 0.5) ** 2, 0, 1)                 # 目ごとのふくらみ
+    groove = np.clip((edge - 0.43) / 0.07, 0, 1)                 # 目の境目の溝
+    shade = (0.62 + 0.30 * bulge + 0.10 * thread) * (1 - 0.55 * groove)
+    rimg = np.stack([c * shade for c in WRAP_RED], -1)
+    red_img = Image.new("RGB", (w, h), WRAP_RED)
+    red_img.paste(Image.fromarray(np.clip(rimg, 0, 255).astype(np.uint8), "RGB"), (xa, 0))
+    rh_part = Image.fromarray(np.clip((0.55 * bulge + 0.12 * thread - 0.5 * groove) * 255, 0, 255).astype(np.uint8), "L")
+    rh = Image.new("L", (w, h), 0)
+    rh.paste(rh_part, (xa, 0))
+    del rimg, shade, bulge, groove, thread, edge
+    # 窓の中: 深い紫 + 金のふち + 金の飾り (縦に並ぶ 3 つの玉)
+    win_img = Image.new("RGB", (w, h), (52, 30, 118))
+    wf = Image.new("L", (w, h), 0)
+    wd = ImageDraw.Draw(wf)
+    orn = Image.new("L", (w, h), 0)
+    od = ImageDraw.Draw(orn)
+    for i, j in WRAP_WINDOWS:
+        sc = WRAP_S0 + (i + j + 1) * WRAP_PERIOD / 2
+        vc = (0.25 + m * (i - j) * WRAP_PERIOD / 2) % 1.0
+        hs = WIN_HALF_S
+        poly = [(X(sc - hs), Y(vc)), (X(sc), Y(vc + WIN_HALF_V)), (X(sc + hs), Y(vc)), (X(sc), Y(vc - WIN_HALF_V))]
+        wd.polygon(poly, outline=255, width=int(5 * F))
+        sgn = -1 if vc < 0.5 else 1          # 峰側 (表は v が小さい側, 裏は大きい側)
+        bx = X(sc)
+        rs = (X(sc + 1) - X(sc))             # 写真 1px の幅
+        for dv, rr in ((-0.42, 1.4), (-0.08, 2.0), (0.30, 1.7)):
+            by = Y(vc + sgn * dv * WIN_HALF_V)
+            od.ellipse([bx - rr * rs, by - rr * rs, bx + rr * rs, by + rr * rs], fill=255)
+        by0, by1 = Y(vc + sgn * 0.30 * WIN_HALF_V), Y(vc + sgn * 0.62 * WIN_HALF_V)  # 下の玉からしずく形にすぼまる
+        od.polygon([(bx - 1.7 * rs, by0), (bx + 1.7 * rs, by0), (bx, by1)], fill=255)
+    win_m = Image.new("L", (w, h), 0)
+    wmd = ImageDraw.Draw(win_m)
+    for i, j in WRAP_WINDOWS:
+        sc = WRAP_S0 + (i + j + 1) * WRAP_PERIOD / 2
+        vc = (0.25 + m * (i - j) * WRAP_PERIOD / 2) % 1.0
+        wmd.polygon([(X(sc - WIN_HALF_S), Y(vc)), (X(sc), Y(vc + WIN_HALF_V)), (X(sc + WIN_HALF_S), Y(vc)), (X(sc), Y(vc - WIN_HALF_V))], fill=255)
+    win_m = blur(win_m, 0.6)
+    wf = blur(wf, 0.8)
+    orn = blur(orn, 0.8)
+    win_img.paste(GOLD_PIPE[1], (0, 0), wf)
+    red_img.paste(win_img, (0, 0), win_m)
+
+    # ---- 金の線: ふちは濃く、中央は明るい (丸く盛り上がった線)
+    core = blur(gold, 10)   # 線の中央ほど明るい
+    gold_img = Image.merge("RGB", [core.point([round(lerp_color(list(zip((0.0, 0.5, 1.0), GOLD_PIPE)), v / 255)[k])
+                                               for v in range(256)]) for k in range(3)])
+    shadow = ImageChops.subtract(blur(gold, 6), gold)              # 線のまわりの影
+    img.paste((40, 20, 70), (0, 0), shadow.point(lambda a: min(255, a * 1.4)))
+    outline = ImageChops.subtract(blur(gold, 2.5).point(lambda a: 255 if a > 20 else 0), gold)   # 線のふちの細い濃い縁
+    img.paste((46, 26, 52), (0, 0), blur(outline, 0.8).point(lambda a: a * 0.85))
+
+    img.paste(red_img, (0, 0), red)
+    for orn_m in (orn,):
+        orn_img = Image.merge("RGB", [blur(orn_m, 3).point([round(lerp_color(list(zip((0.0, 0.5, 1.0), GOLD_PIPE)), v / 255)[k])
+                                                           for v in range(256)]) for k in range(3)])
+        img.paste(orn_img, (0, 0), ImageChops.multiply(orn_m, red))
+    img.paste(gold_img, (0, 0), gold)
+
+    # ---- 柄頭の金の巻きの中の、薄紫の楕円の象眼 (表と裏)
+    inl = Image.new("L", (w, h), 0)
+    il = ImageDraw.Draw(inl)
+    for vc in (INLAY_V, 1 - INLAY_V):
+        cx, cy = X(INLAY_S), Y(vc)
+        rx, ry = X(INLAY_S + 5) - cx, h * 0.040
+        il.ellipse([cx - rx, cy - ry, cx + rx, cy + ry], fill=255)
+    inl = blur(inl, 0.8)
+    inl_img = ImageChops.multiply(vgradient((w, h), [(0.0, (236, 226, 252)), (1.0, (206, 190, 240))]),
+                                  Image.new("RGB", (w, h), (255, 255, 255)))
+    img.paste((150, 110, 50), (0, 0), ImageChops.subtract(blur(inl, 5), inl))   # 象眼のふちの影
+    img.paste(inl_img, (0, 0), inl)
     maps.put(UV_HANDLE, img, Image.new("RGB", (w, h), (0, 0, 0)))
 
-    # 凹凸: 組紐は盛り上がり、織り目の筋、交差点はさらに高く、マーブルは平ら
-    maps.bump(UV_HANDLE, blur(band, 1.5), 0.14)
-    maps.bump(UV_HANDLE, weave_all, 0.04)
-    maps.bump(UV_HANDLE, blur(cross, 1.5), 0.04)
-    maps.noise(UV_HANDLE, 0.01, 6 * F)
-
-
-# ---------------------------------------------------------------- 金具
-def draw_gold(maps):
-    x0, y0, x1, y1 = uv_box(UV_GOLD)
-    w, h = x1 - x0, y1 - y0
-    img = vgradient((w, h), GOLD_STOPS)
-    # 唐草の彫り: 波打つ蔓と、交互に巻く渦
-    eng = Image.new("L", (w, h), 0)
-    d = ImageDraw.Draw(eng)
-    lw = int(3 * F)
-    cy, amp, period = h * 0.5, h * 0.22, h * 1.6
-    vine = [(x, cy + amp * math.sin(x / period * math.tau)) for x in range(0, w + 1, int(4 * F))]
-    d.line(vine, fill=255, width=lw)
-    k = 0
-    for x in np.arange(period * 0.25, w, period * 0.5):
-        side = 1 if k % 2 == 0 else -1
-        k += 1
-        bx, by = x, cy + amp * math.sin(x / period * math.tau)
-        pts = []
-        for i in range(40):
-            t = i / 39
-            a = side * (t * 2.2 * math.pi)
-            r = h * 0.20 * (1 - t * 0.8)
-            pts.append((bx + r * math.sin(a) + t * h * 0.12, by - side * (h * 0.20 - r * math.cos(a))))
-        d.line(pts, fill=255, width=lw)
-        # 小さな葉
-        lx, ly = pts[len(pts) // 3]
-        d.ellipse([lx - 6 * F, ly - 3 * F, lx + 6 * F, ly + 3 * F], fill=255)
-    eng = blur(eng, 0.7)
-    img.paste(GOLD_ENGRAVE, (0, 0), eng.point(lambda a: a * 0.8))
-    img.paste(GOLD_SHINE, (0, 0), ImageChops.offset(eng, int(-2 * F), int(-2 * F)).point(lambda a: a * 0.35))
-    maps.put(UV_GOLD, img, Image.new("RGB", (w, h), (0, 0, 0)))
-    maps.bump(UV_GOLD, eng, -0.12)
+    # 凹凸: 金の線は丸く盛り上がる / 柄巻きは目ごとにふくらみ、境目は溝 / 窓は一段低い / 象眼はふくらむ
+    maps.bump(UV_HANDLE, blur(gold, 4), 0.16)
+    maps.bump(UV_HANDLE, ImageChops.multiply(rh, red), 0.10)
+    maps.bump(UV_HANDLE, ImageChops.multiply(win_m, red), -0.10)
+    maps.bump(UV_HANDLE, ImageChops.multiply(blur(orn, 3), red), 0.14)
+    maps.bump(UV_HANDLE, blur(inl, 6), 0.10)
+    maps.noise(UV_HANDLE, 0.006, 6 * F)
 
 
 # ---------------------------------------------------------------- 小物
@@ -506,81 +548,53 @@ def draw_guard(maps):
 
 
 def draw_white(maps):
+    """白く光る巴。"""
     x0, y0, x1, y1 = uv_box(UV_WHITE)
     img = Image.new("RGB", (x1 - x0, y1 - y0), GLOW_WHITE)
     maps.put(UV_WHITE, img, img)
 
 
 def draw_tsuba(maps):
-    """真珠のような光沢の鍔。内側に淡く光る線、縁に彫りの二重線。"""
+    """金色の楕円の鍔 (参考画像の写真どおり)。UV は鍔の楕円を正方形に広げたもの (中心 = 鍔の中心)。
+    同心円の細かい磨き目と、ごく細かい槌目 (つちめ)、外側の耳は明るく磨いた金、耳の内側に細い溝。"""
     x0, y0, x1, y1 = uv_box(UV_TSUBA)
     w, h = x1 - x0, y1 - y0
-    img = ImageChops.multiply(
-        hgradient((w, h), [(0.0, (250, 236, 255)), (0.35, (238, 226, 255)), (0.65, (252, 236, 250)), (1.0, (236, 230, 255))]),
-        vgradient((w, h), [(0.0, (236, 226, 250)), (0.5, (255, 255, 255)), (1.0, (232, 222, 248))]))
-    m = Image.new("L", (w, h), 0)
-    d = ImageDraw.Draw(m)
-    for inset, lw in ((10, 6), (26, 3)):
-        d.rectangle([inset * F, inset * F, w - inset * F, h - inset * F], outline=255, width=int(lw * F))
-    m = blur(m, 0.8)
-    img.paste((206, 176, 250), (0, 0), m)
-    line = Image.new("L", (w, h), 0)
-    ImageDraw.Draw(line).line([(40 * F, h / 2), (w - 40 * F, h / 2)], fill=255, width=int(4 * F))
-    line = blur(line, 3)
-    img.paste((226, 196, 255), (0, 0), line)
-    emis = scale_rgb(img, 0.8)
-    emis.paste((240, 220, 255), (0, 0), line)
-    maps.put(UV_TSUBA, img, emis)
-    maps.bump(UV_TSUBA, m, -0.08)
+    yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+    r = np.hypot((xx + 0.5) / w * 2 - 1, (yy + 0.5) / h * 2 - 1)          # 0 = 中心, 1 = 外周
+    ang = np.arctan2(yy / h - 0.5, xx / w - 0.5)
+    rings = np.sin(r * 900 + np.sin(ang * 3) * 0.6) * 0.5 + 0.5            # 磨き目
+    hammer = np.asarray(blur(Image.effect_noise((w // int(3 * F), h // int(3 * F)), 60).resize((w, h), Image.BICUBIC), 1.5),
+                        dtype=np.float32) / 255.0 - 0.5
+    rim = np.clip((r - 0.86) / 0.03, 0, 1)                                 # 耳
+    groove = np.exp(-((r - 0.855) / 0.006) ** 2)                            # 耳の内側の溝
+    t_col = np.clip(0.42 + 0.08 * (rings - 0.5) + 0.12 * hammer * (1 - rim) + 0.30 * rim - 0.30 * groove, 0, 1)
+    del rings, ang
+    lut = np.array([lerp_color(TSUBA_GOLD, v / 255) for v in range(256)], dtype=np.uint8)
+    img = Image.fromarray(lut[(t_col * 255).astype(np.uint8)], "RGB")
+    maps.put(UV_TSUBA, img, Image.new("RGB", (w, h), (0, 0, 0)))
+    hgt = Image.fromarray(np.clip((0.5 + hammer * 0.3 * (1 - rim) - 0.8 * groove) * 255, 0, 255).astype(np.uint8), "L")
+    maps.bump(UV_TSUBA, hgt, 0.08)
 
 
-def draw_flame(maps):
-    x0, y0, x1, y1 = uv_box(UV_FLAME)
-    # 下 (v 小) = 根元の白、上 = 先端の黄色
-    img = vgradient((x1 - x0, y1 - y0), [(0.0, (255, 236, 150)), (0.45, (255, 246, 200)), (1.0, (255, 255, 248))])
-    maps.put(UV_FLAME, img, img)
-
-
-def draw_fin(maps):
-    """紫のトゲ (横 = 付け根→先端)。付け根は深い紫、先端ほど明るい星雲の色。中央に光る筋、縁は明るく。"""
-    x0, y0, x1, y1 = uv_box(UV_FIN)
+def draw_stud(maps):
+    """柄の薄紫の鋲 (真珠のような丸い玉)。中心が明るい放射状のグラデーション。"""
+    x0, y0, x1, y1 = uv_box(UV_STUD)
     w, h = x1 - x0, y1 - y0
-    rng = random.Random(41)
-    img = ImageChops.multiply(marble((w, h), (120, 90, 210), (255, 255, 255), scale=60),
-                              hgradient((w, h), [(0.0, (88, 56, 182)), (0.6, (150, 110, 244)), (1.0, (214, 184, 255))]))
-    img = Image.blend(img, blur(img, 6), 0.5)
-    vein = Image.new("L", (w, h), 0)
-    d = ImageDraw.Draw(vein)
-    d.line([(0, h * 0.5), (w, h * 0.5)], fill=255, width=int(8 * F))
-    for k in range(6):
-        xa = w * (0.1 + 0.14 * k)
-        d.line([(xa, h * 0.5), (xa + w * 0.12, h * 0.18)], fill=255, width=int(3 * F))
-        d.line([(xa, h * 0.5), (xa + w * 0.12, h * 0.82)], fill=255, width=int(3 * F))
-    vein = blur(vein, 2)
-    rim = Image.new("L", (w, h), 0)
-    ImageDraw.Draw(rim).rectangle([0, 0, w - 1, h - 1], outline=255, width=int(14 * F))
-    rim = blur(rim, 6)
-    img.paste((214, 186, 255), (0, 0), vein.point(lambda a: a * 0.8))
-    img.paste((226, 200, 255), (0, 0), rim.point(lambda a: a * 0.6))
-    dust = stardust((w, h), rng, 160, 6)
-    img.paste((255, 250, 255), (0, 0), blur(dust, 0.5))
-    emis = scale_rgb(img, 0.35)
-    emis.paste((214, 180, 255), (0, 0), vein)
-    emis.paste(GLOW_WHITE, (0, 0), blur(dust, 0.5))
-    maps.put(UV_FIN, img, emis)
-    maps.bump(UV_FIN, vein, 0.10)
+    yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+    r = np.clip(np.hypot((xx + 0.5) / w * 2 - 1, (yy + 0.5) / h * 2 - 1), 0, 1)
+    c0, c1 = np.array((246, 240, 255), np.float32), np.array((176, 156, 226), np.float32)
+    img = c0 + (c1 - c0) * (r[..., None] ** 1.6)
+    maps.put(UV_STUD, Image.fromarray(img.astype(np.uint8), "RGB"), Image.new("RGB", (w, h), (0, 0, 0)))
 
 
 def main():
     maps = Maps()
     draw_blade(maps)
     draw_handle(maps)
-    draw_gold(maps)
     draw_guard(maps)
     draw_white(maps)
     draw_tsuba(maps)
-    draw_flame(maps)
-    draw_fin(maps)
+    draw_stud(maps)
     maps.albedo.save(OUT_ALBEDO, optimize=True)
     maps.emission.save(OUT_EMISSION, optimize=True)
     maps.normal_map().save(OUT_NORMAL, optimize=True)

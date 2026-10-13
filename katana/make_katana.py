@@ -7,18 +7,18 @@ FBX で書き出す Blender スクリプト (Blender 5.1 で動作確認)。
   B) コマンドライン:  blender -b -P make_katana.py -- --out <出力フォルダ>
 
 作成されるもの:
-  - Katana : 刀本体 (刃・付け根の飾り板と白い巴・鍔・柄・金具・柄頭の炎を 1 メッシュ)
-      マテリアル 2 個: Katana_Blade (光る部分) / Katana_Hilt (柄と金具)
+  - Katana : 刀本体 (刃・付け根の飾り板と白い巴・鍔・柄・鋲を 1 メッシュ)
+      マテリアル 2 個: Katana_Blade (光る部分) / Katana_Hilt (鍔・柄)
   - Grip   : 握る位置の目印 (空のオブジェクト、Katana の子)
   - Tip    : 切っ先の目印 (空のオブジェクト、Katana の子)
   - Katana.fbx と Katana_Atlas.png を出力フォルダに書き出し
 
 仕様:
-  - 刃の反り・鍔は参考画像 (ゲーム画面) を測って合わせています
-  - 刃の付け根の飾り板 (トゲ・巻き・抜け) と白い巴のかけらは、参考画像の輪郭をなぞった形
-  - VRChat のアバター (身長 1.4〜1.6m 前後) に合わせた大きさ: 全長 約 1.07m
-    (刃 80cm・柄 20cm・柄頭の飾り 約 7cm)。参考画像のように刃が柄の約 4 倍の細長いバランス。
-    SCALE で全体の大きさを変えられます
+  - 刃の反りは参考画像 (ゲーム画面) を測って合わせています
+  - 刃の付け根の飾り板 (トゲ・巻き・抜け) と白い巴のかけら、金色の楕円の鍔、柄 (飾り板のトゲ・
+    金の線・赤い柄巻きと菱形の窓・鋲・柄頭) は、参考画像 (コスプレ用の刀の写真) を測ってなぞった形
+  - VRChat のアバター (身長 1.4〜1.6m 前後) に合わせた大きさ: 全長 約 1.04m
+    (刃 80cm・柄 24cm)。SCALE で全体の大きさを変えられます
   - Unity では刃が上 (Y)、刃先が前 (+Z)。原点は鍔の中心
   - テクスチャは 3 枚 (どれも 8192x8192、2 つのマテリアルで共有):
       Katana_Atlas.png (色) / Katana_Emission.png (発光) / Katana_Normal.png (ノーマルマップ)
@@ -38,9 +38,9 @@ import bmesh
 from mathutils import Matrix, Vector
 
 # ---------------------------------------------------------------- 設定
-SCALE = 1.0            # 全体の大きさ (1.0 = 全長 約 1.07m)
+SCALE = 1.0            # 全体の大きさ (1.0 = 全長 約 1.04m)
 BLADE_LEN = 0.80       # 刃の長さ (m)
-HANDLE_LEN = 0.20      # 柄の長さ (m)
+HANDLE_LEN = 0.24      # 柄の長さ (m, 鍔の表から柄頭まで)。参考画像の写真の比率
 # 反り: 刃の向きが根元から切っ先までに曲がる角度 (度)。参考画像を測った値。
 #   根元から半ばまではゆるやか (CURVE_BASE)、先の 2 割で急に曲がる (CURVE_TIP, 先反り)
 CURVE_BASE = 27.0      # 参考画像の反りの深さ (弦の約 7.9%) に合わせた値
@@ -54,20 +54,22 @@ ATLAS_NAME = "Katana_Atlas.png"          # 色
 EMISSION_NAME = "Katana_Emission.png"    # 発光 (光らせたい所だけ明るい)
 NORMAL_NAME = "Katana_Normal.png"        # ノーマルマップ (凹凸)
 TEXTURES = (ATLAS_NAME, EMISSION_NAME, NORMAL_NAME)
+# 鍔: 参考画像の写真を測った金色の楕円
+TSUBA_SIZE = (0.112, 0.084)   # (峰〜刃の方向, 厚みの方向) の直径 (m)
+TSUBA_T = 0.0055              # 鍔の厚み (m)
+TSUBA_OFFSET = -0.004         # 刃の幅の中心から峰側へずらす量 (m, 写真では峰側が少し長い)
 OBJECT_NAME = "Katana"
-BLADE_MATERIAL = "Katana_Blade"   # 刃・紋・ヒレ・鍔・光る玉・柄頭の炎 (光る)
-HILT_MATERIAL = "Katana_Hilt"     # 柄巻き・金具
+BLADE_MATERIAL = "Katana_Blade"   # 刃・付け根の飾り板・白い巴 (光る)
+HILT_MATERIAL = "Katana_Hilt"     # 鍔・柄・鋲 (光らない)
 
 # アトラスのレイアウト (make_katana_texture.py と一致させる)
 UV_BLADE = (0.0, 0.0, 1.0, 0.36)
-UV_HANDLE = (0.0, 0.38, 1.0, 0.66)
-UV_GOLD = (0.0, 0.68, 1.0, 0.76)
+UV_HANDLE = (0.0, 0.38, 1.0, 0.66)    # 柄 (横 = 鍔側→柄頭, 縦 = 一周: 0 = 峰, 0.25 = 表, 0.5 = 刃側, 0.75 = 裏)
 UV_GUARD = (0.0, 0.78, 0.20, 0.98)    # 刃の付け根の飾り板 (濃い紫と薄い紫の炎の模様)
 UV_WHITE = (0.22, 0.78, 0.30, 0.98)
 UV_TSUBA = (0.32, 0.78, 0.52, 0.98)
-UV_FLAME = (0.54, 0.78, 0.64, 0.98)
+UV_STUD = (0.54, 0.78, 0.64, 0.98)     # 柄の薄紫の鋲
 UV_PAD = 0.002
-UV_DARK = (0.93, 0.88)        # アトラスの空き部分 (濃い紫一色)
 
 # 飾り板の模様の範囲 (make_katana_texture.py と一致させる)。UV_GUARD の中に
 # a (鍔からの長さ) と e (峰からの距離) を同じ縮尺で並べる。上の余白は側面用の薄紫
@@ -362,113 +364,101 @@ def build_guard(b):
 
 
 def build_tsuba(b):
-    """細長い棒状の鍔 (両端は斜めにとがる)。"""
-    L0, L1, hw = -0.046, BLADE_W + 0.064, 0.0085
-    outline = [(L0, 0.0), (L0 + 0.013, -hw), (L1 - 0.013, -hw), (L1, 0.0), (L1 - 0.013, hw), (L0 + 0.013, hw)]
+    """金色の楕円の鍔 (参考画像の写真どおり)。表と裏のふちが少し盛り上がる (耳)。"""
+    seg = 40
+    A, B = TSUBA_SIZE[0] / 2, TSUBA_SIZE[1] / 2        # 峰〜刃の方向 / 厚みの方向の半径
+    _, n = frame(0.0)
+    c = spine(0.0) + n * (BLADE_W / 2 + TSUBA_OFFSET)
+    T = TSUBA_T
+    # (大きさ, 鍔からの深さ): 表の面 → 耳 → 外周 → 耳 → 裏の面
+    prof = ((0.86, -0.0006), (0.93, 0.0), (1.0, -0.0012), (1.0, -T + 0.0012), (0.93, -T), (0.86, -T + 0.0006))
+    rings = [[c + X * (B * s * math.cos(a)) + n * (A * s * math.sin(a)) + Vector((0.0, 0.0, d))
+              for a in (math.tau * j / seg for j in range(seg))] for s, d in prof]
 
-    def to3d(a, bb, d):
-        _, n = frame(0.0)
-        return spine(d) + n * a + X * bb
+    def face_uv(s, j):
+        a = math.tau * j / seg
+        return map_rect(UV_TSUBA, 0.5 + 0.5 * s * math.cos(a), 0.5 + 0.5 * s * math.sin(a))
 
-    b.prism(outline, to3d, -0.008, 0.0,
-            lambda a, bb: map_rect(UV_TSUBA, (a - L0) / (L1 - L0), 0.5 + bb / hw * 0.5),
-            lambda s_, t_: map_rect(UV_TSUBA, s_, 0.5), MAT_BLADE)
+    vs =[[b.bm.verts.new(p) for p in ring] for ring in rings]
+    for i in range(len(vs) - 1):
+        for j in range(seg):
+            k = (j + 1) % seg
+            quad = (vs[i][j], vs[i][k], vs[i + 1][k], vs[i + 1][j])
+            if i == 2:      # 外周の側面は耳と同じ磨いた金
+                uvs = [face_uv(0.96, j), face_uv(0.96, j + 1), face_uv(0.97, j + 1), face_uv(0.97, j)]
+            else:
+                uvs = [face_uv(prof[i][0], j), face_uv(prof[i][0], j + 1),
+                       face_uv(prof[i + 1][0], j + 1), face_uv(prof[i + 1][0], j)]
+            b.face(quad, uvs, MAT_HILT)
+    b.face(list(reversed(vs[0])), [face_uv(prof[0][0], j) for j in reversed(range(seg))], MAT_HILT)
+    b.face(vs[-1], [face_uv(prof[-1][0], j) for j in range(seg)], MAT_HILT)
 
 
-def handle_radius(t):
-    """柄の断面 (厚み方向, 刃の方向) の半径。中ほどがわずかに細い。"""
-    u = (-t) / HANDLE_LEN
-    k = 1.0 - 0.05 * math.sin(math.pi * u)
-    return 0.0118 * k, 0.0150 * k
-
-
-def ellipse_ring(t, rx, rn, seg, scale=1.0):
-    """楕円のリング。継ぎ目 (j=0) は峰側に置いて目立たないようにする。"""
+def handle_ring(u):
+    """柄の u (0 = 鍔の裏, 1 = 柄頭) での (中心, 刃の方向の半径, 厚みの方向の半径)。"""
+    k = BLADE_W / 0.032
+    rs = HANDLE_RINGS
+    for (u0, l0, h0, x0), (u1, l1, h1, x1) in zip(rs, rs[1:]):
+        if u <= u1:
+            f = (u - u0) / max(1e-9, u1 - u0)
+            lo, hi, rx = lerp(l0, l1, f), lerp(h0, h1, f), lerp(x0, x1, f)
+            break
+    else:
+        _, lo, hi, rx = rs[-1]
+    t = handle_t(u)
     _, n = frame(t)
-    c = center(t)
-    return [c + X * (rx * scale * math.cos(a)) + n * (rn * scale * math.sin(a))
-            for a in (-math.pi / 2 + math.tau * j / seg for j in range(seg))]
+    return spine(t) + n * ((lo + hi) / 2 * k), (hi - lo) / 2 * k, rx * k
+
+
+def handle_t(u):
+    return lerp(-TSUBA_T, -HANDLE_LEN, u)
+
+
+def handle_point(u, a, lift=0.0):
+    """柄の表面の点と外向きの向き。a = 周りの角度 (-90° = 峰, 0° = 表の中央, 90° = 刃側)。"""
+    c, rn, rx = handle_ring(u)
+    _, n = frame(handle_t(u))
+    nrm = (X * (math.cos(a) / rx) + n * (math.sin(a) / rn)).normalized()
+    return c + X * (rx * math.cos(a)) + n * (rn * math.sin(a)) + nrm * lift, nrm
 
 
 def build_handle(b):
-    """柄: 楕円の断面。紫のマーブルに銀の柄巻き (テクスチャ)。"""
-    seg = 20
-    t0, t1 = -0.008, -HANDLE_LEN
-    ts = [lerp(t0, t1, i / 16) for i in range(17)]
-    rings = [ellipse_ring(t, *handle_radius(t), seg) for t in ts]
-    b.rings(rings, lambda i, j: map_rect(UV_HANDLE, i / 16, j / seg), MAT_HILT)
+    """柄: 参考画像の写真の輪郭を測った断面 (鍔の近くの 2 枚の飾り板のトゲ・刃側の張り出し、
+    少し太くなる柄頭と峰側の小さな鉤) を楕円のリングでつなぐ。模様 (金の線・赤い柄巻き) はテクスチャ。"""
+    seg = 18
+    rows = []
+    for u, *_ in HANDLE_RINGS:
+        c, rn, rx = handle_ring(u)
+        _, n = frame(handle_t(u))
+        rows.append([c + X * (rx * math.cos(a)) + n * (rn * math.sin(a))
+                     for a in (-math.pi / 2 + math.tau * j / seg for j in range(seg))])
+    us = [r[0] for r in HANDLE_RINGS]
+    c_end, _, _ = handle_ring(1.0)
+    tan, _ = frame(handle_t(1.0))
+    b.rings(rows, lambda i, j: map_rect(UV_HANDLE, us[min(i, len(us) - 1)], j / seg), MAT_HILT,
+            cap_end=c_end - tan * 0.002)
 
 
-def build_fittings(b):
-    """縁 (ふち) と柄頭 (かしら) の金具。縁は濃い紫、柄頭は金。"""
-    seg = 20
-    gold = lambda i, j: map_rect(UV_GOLD, j / seg, 0.5)
-    # 縁: 鍔の下の輪 (参考画像どおり濃い紫)
-    rx, rn = handle_radius(-0.008)
-    rings = [ellipse_ring(t, rx, rn, seg, s) for t, s in ((-0.008, 1.10), (-0.020, 1.08), (-0.022, 1.0))]
-    b.rings(rings, lambda i, j: UV_DARK, MAT_BLADE)
-    # 柄頭: 丸くすぼまる金具
-    tE = -HANDLE_LEN
-    rx, rn = handle_radius(tE)
-    prof = ((tE + 0.010, 1.0), (tE + 0.008, 1.10), (tE - 0.006, 1.10), (tE - 0.013, 0.85), (tE - 0.018, 0.45))
-    rings = [ellipse_ring(t, rx, rn, seg, s) for t, s in prof]
-    b.rings(rings, gold, MAT_HILT, cap_end=center(tE - 0.020))
+def build_studs(b):
+    """鍔の近くの飾り板にある、薄紫の丸い鋲 (表と裏に 2 つずつ)。"""
+    r, hgt, seg = 0.0030, 0.0021, 8
+    for u, deg in HANDLE_STUDS:
+        for a in (math.radians(deg), math.pi - math.radians(deg)):     # 表と、裏 (左右対称)
+            p, nrm = handle_point(u, a)
+            tx = nrm.cross(Vector((0.0, 0.0, 1.0)))
+            if tx.length < 1e-6:
+                tx = nrm.cross(X)
+            tx.normalize()
+            ty = nrm.cross(tx)
+            base = p - nrm * 0.0008                      # 少し埋めて浮きを防ぐ
+            lat = ((1.0, 0.0), (0.82, 0.55), (0.45, 0.9))
+            rings = [[base + (tx * math.cos(q) + ty * math.sin(q)) * (r * rr) + nrm * (hgt * hh + 0.0008)
+                      for q in (math.tau * j / seg for j in range(seg))] for rr, hh in lat]
 
-
-def build_pommel_flame(b):
-    """柄頭の先の黄色く光る炎 (しずく形)。"""
-    seg = 12
-    tE = -HANDLE_LEN - 0.016
-    prof = ((0.000, 0.0040), (0.010, 0.0075), (0.022, 0.0070), (0.034, 0.0040), (0.044, 0.0015))
-    rings = []
-    for dz, r in prof:
-        rings.append(ellipse_ring(tE - dz, r, r, seg))
-    nprof = len(prof)
-    b.rings(rings, lambda i, j: map_rect(UV_FLAME, j / seg, i / nprof), MAT_BLADE,
-            cap_start=lambda co: map_rect(UV_FLAME, 0.5, 0.0), cap_end=center(tE - 0.052))
-
-
-def build_orbs(b):
-    """柄の峰側に並ぶ、白く光る 2 つの玉。"""
-    for t in (-0.034, -0.058):
-        _, n = frame(t)
-        rx, rn = handle_radius(t)
-        c = center(t) - n * (rn + 0.0035)
-        r = 0.0055
-        rings = []
-        for i in range(1, 6):
-            phi = math.pi * i / 6
-            rings.append([c + Vector((r * math.sin(phi) * math.cos(a), r * math.sin(phi) * math.sin(a), r * math.cos(phi)))
-                          for a in (math.tau * j / 10 for j in range(10))])
-        white = lambda i, j: map_rect(UV_WHITE, 0.5, 0.5)
-        b.rings(rings, white, MAT_BLADE, cap_start=c + Vector((0, 0, r)), cap_end=c - Vector((0, 0, r)))
-
-
-def build_talons(b):
-    """柄の峰側に並ぶ、柄頭の方へ反った金の爪飾り。"""
-    for k, t0 in enumerate(-HANDLE_LEN * f for f in (0.36, 0.50, 0.64, 0.78, 0.91)):
-        size = 1.0 + 0.25 * k / 4
-        L, W = 0.026 * size, 0.0055 * size
-        center_line = []
-        steps = 8
-        for i in range(steps + 1):
-            s = i / steps
-            center_line.append((-L * s, -0.018 * size * math.sin(s * math.pi / 2) - 0.006 * s))
-        outline = []
-        for i, (a, bb) in enumerate(center_line):
-            outline.append((a, bb + W * (1 - i / steps) * 0.5))
-        for i, (a, bb) in reversed(list(enumerate(center_line))):
-            outline.append((a, bb - W * (1 - i / steps) * 0.5))
-
-        def to3d(a, bb, d, t0=t0):
-            t = t0 + a
-            _, n = frame(t)
-            rx, rn = handle_radius(t)
-            return center(t) - n * (rn - 0.002) + n * bb + X * d
-
-        b.prism(outline, to3d, -0.0011, 0.0011,
-                lambda a, bb: map_rect(UV_GOLD, min(1.0, 0.3 - a / 0.1), min(1.0, max(0.0, 0.5 + bb / 0.07))),
-                lambda s_, t_: map_rect(UV_GOLD, s_, 0.2 + 0.6 * t_), MAT_HILT)
+            def uv_of(i, j, lat=lat):
+                q = math.tau * j / seg
+                return map_rect(UV_STUD, 0.5 + 0.5 * lat[min(i, 2)][0] * math.cos(q), 0.5 + 0.5 * lat[min(i, 2)][0] * math.sin(q))
+            b.rings(rings, uv_of, MAT_HILT, cap_end=base + nrm * (hgt + 0.0008))
 
 
 def build_mesh():
@@ -477,10 +467,7 @@ def build_mesh():
     build_guard(b)
     build_tsuba(b)
     build_handle(b)
-    build_fittings(b)
-    build_pommel_flame(b)
-    build_orbs(b)
-    build_talons(b)
+    build_studs(b)
     bm = b.bm
 
     # へこんだ多角形も正しく三角形にする (Unity での読み込みを安定させる)
@@ -525,7 +512,7 @@ def build_scene():
     me, origin = build_mesh()
     albedo, emis, normal = (load_texture(n) for n in TEXTURES)
     me.materials.append(make_material(BLADE_MATERIAL, albedo, normal, roughness=0.3, emission_img=emis, emission=1.5))
-    me.materials.append(make_material(HILT_MATERIAL, albedo, normal, roughness=0.45))
+    me.materials.append(make_material(HILT_MATERIAL, albedo, normal, roughness=0.35))
     katana = bpy.data.objects.new(OBJECT_NAME, me)
     coll.objects.link(katana)
 
@@ -590,6 +577,33 @@ def main():
     print("[Katana] size: %.3f x %.3f x %.3f m" % (dims.x, dims.y, dims.z))
     print("[Katana] exported:", path)
 
+
+# ---------------------------------------------------------------- 柄の形のデータ
+# 参考画像の写真の柄の輪郭を測った断面 (刃の幅 3.2cm 基準, 単位 m)。
+# (u = 鍔の裏 0 → 柄頭 1, 峰側のふち, 刃側のふち (どちらも峰の線からの距離), 厚みの方向の半径)
+HANDLE_RINGS = [
+    (0.0001, -0.00237, 0.03566, 0.01321), (0.0262, -0.00237, 0.03082, 0.01321), (0.048, -0.00237, 0.02932, 0.01267),
+    (0.0557, -0.00372, 0.0297, 0.01337), (0.0712, -0.00214, 0.03098, 0.01325), (0.0754, -0.0019, 0.03252, 0.01345),
+    (0.0811, -0.00166, 0.03629, 0.01363), (0.0846, -0.0017, 0.03711, 0.01375), (0.1022, -0.00582, 0.03712, 0.01433),
+    (0.1261, -0.01029, 0.03526, 0.01512), (0.1585, -0.01402, 0.03368, 0.01484), (0.1662, -0.01311, 0.03348, 0.01481),
+    (0.1753, -0.00767, 0.03322, 0.01476), (0.1824, -0.00578, 0.03293, 0.01469), (0.2077, -0.00318, 0.03225, 0.01417),
+    (0.2471, -0.00676, 0.03175, 0.01397), (0.257, -0.00702, 0.0324, 0.01422), (0.2696, -0.00605, 0.0321, 0.01407),
+    (0.2823, -0.0035, 0.03156, 0.01384), (0.2978, -0.00275, 0.03165, 0.01376), (0.3062, -0.00278, 0.03223, 0.01401),
+    (0.3351, -0.00212, 0.03111, 0.01329), (0.3562, -0.00171, 0.032, 0.01348), (0.3892, -0.00087, 0.03178, 0.01306),
+    (0.4223, -0.00034, 0.03201, 0.01294), (0.4469, -0.00091, 0.03244, 0.01334), (0.461, -5e-05, 0.03174, 0.01271),
+    (0.4969, -9e-05, 0.0327, 0.01312), (0.5265, 0.00064, 0.03234, 0.01268), (0.549, -0.0001, 0.03212, 0.01289),
+    (0.5701, 0.00059, 0.03212, 0.01261), (0.5849, -0.00018, 0.03223, 0.01297), (0.5954, 0.00013, 0.03307, 0.01318),
+    (0.6299, 0.00136, 0.03259, 0.01249), (0.6482, 0.00103, 0.03159, 0.01223), (0.6686, 0.00012, 0.03165, 0.01261),
+    (0.6911, 0.0006, 0.03171, 0.01244), (0.7122, 7e-05, 0.03271, 0.01306), (0.7249, -0.00041, 0.0317, 0.01284),
+    (0.7467, -0.00156, 0.03197, 0.01341), (0.7657, -0.00121, 0.03205, 0.0133), (0.7889, -0.00358, 0.03297, 0.01462),
+    (0.8037, -0.00331, 0.03182, 0.01405), (0.8445, -0.00225, 0.03198, 0.01369), (0.8656, -0.0027, 0.03183, 0.01381),
+    (0.8938, -0.00549, 0.03182, 0.01493), (0.936, -0.00412, 0.03131, 0.01417), (0.9564, -0.0048, 0.0304, 0.01408),
+    (0.9627, -0.00573, 0.0298, 0.01421), (0.969, -0.00655, 0.02889, 0.01417), (0.9761, -0.00628, 0.02767, 0.01358),
+    (0.9845, -0.00563, 0.02484, 0.01219), (0.988, -0.00537, 0.02265, 0.01121), (0.9901, -0.00527, 0.02023, 0.0102),
+    (0.9923, -0.00523, 0.01617, 0.00856), (0.9965, -0.00522, 0.00595, 0.00447), (0.9993, -0.00509, 0.00209, 0.00287),
+]
+# 薄紫の鋲 (u, 周りの角度 °: 0 = 表の中央, 正 = 刃側)
+HANDLE_STUDS = [(0.0715, 0.1), (0.1632, 15.2)]
 
 # ---------------------------------------------------------------- 飾り板の形のデータ
 # 参考画像からなぞった輪郭 (a = 鍔からの長さ, e = 峰からの距離, 単位 m, 刃の幅 3.2cm 基準)。
