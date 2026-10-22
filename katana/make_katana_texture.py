@@ -418,7 +418,6 @@ def draw_blade(maps):
     maps.bump(UV_BLADE, blur(hard, 2.5), -0.05)
     maps.bump(UV_BLADE, rim, 0.03)
     maps.bump(UV_BLADE, gr, 0.008)
-    maps.noise(UV_BLADE, 0.004, 3 * F)
 
 
 # ---------------------------------------------------------------- 柄
@@ -487,7 +486,6 @@ def draw_handle(maps):
     # 凹凸: 金の線は丸く盛り上がる / 象眼はふくらむ
     maps.bump(UV_HANDLE, blur(gold, 4), 0.16)
     maps.bump(UV_HANDLE, blur(inl, 6), 0.10)
-    maps.noise(UV_HANDLE, 0.006, 6 * F)
 
 
 # ---------------------------------------------------------------- 小物
