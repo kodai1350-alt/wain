@@ -1,7 +1,7 @@
 """
 刀 (雷電将軍の元素爆発の刀「夢想の一太刀」風, ファンメイド) 用のテクスチャを生成するスクリプト。
 
-1 回の実行で、同じ UV 配置の 3 枚を作ります (どれも 8192x8192):
+1 回の実行で、同じ UV 配置の 3 枚を作ります (色とノーマルは 8192x8192、発光は 4096x4096):
     Katana_Atlas.png     … 色 (ベースカラー)
     Katana_Emission.png  … 発光 (光らせたい所だけ明るい。黒は光らない)
     Katana_Normal.png    … ノーマルマップ (OpenGL 形式 = Unity / Blender と同じ。凹凸の見え方)
@@ -45,6 +45,7 @@ NORMAL_STRENGTH = 20.0
 UV_BLADE = (0.0, 0.0, 1.0, 0.36)
 UV_HANDLE = (0.0, 0.38, 1.0, 0.66)
 UV_GUARD = (0.0, 0.78, 0.20, 0.98)     # 刃の付け根の飾り板
+UV_PAD = 0.002                         # make_katana.py と同じ (UV の四辺の余白)
 GUARD_TONE = os.path.join(HERE, "guard_tone.png")   # 飾り板の塗り分け (参考画像からなぞったもの)
 GUARD_A_MIN, GUARD_A_MAX, GUARD_E_MIN, GUARD_E_MAX = 0.0016, 0.1040, -0.0345, 0.0491
 UV_WHITE = (0.22, 0.78, 0.30, 0.98)
@@ -401,8 +402,9 @@ def draw_blade(maps):
     img.paste(GLOW_WHITE, (0, 0), blur(nie, 0.6).point(lambda a: a * 0.7))
 
     # ---- 発光: 昼は写真の色のまま、暗い所では模様の縁・稲妻・星・刃文が光る
-    emis = scale_rgb(img, 0.10)
-    emis.paste(scale_rgb(core, 0.35), (0, 0), mask)
+    emis = scale_rgb(ImageChops.multiply(tint, shade), 0.10)   # 地のほのかな光 (地肌の細部は省いてファイルを軽く)
+    emis.paste(scale_rgb(edge_col, 0.10), (0, 0), hm_soft)
+    emis.paste(scale_rgb(blur(core, 3), 0.35), (0, 0), mask)
     emis.paste((96, 60, 160), (0, 0), halo.point(lambda a: a * 0.6))
     emis.paste((150, 110, 230), (0, 0), rim_soft.point(lambda a: min(255, a * 1.4)))
     emis.paste((226, 200, 255), (0, 0), rim)
@@ -448,10 +450,22 @@ def draw_handle(maps):
     img = ImageChops.multiply(marble((w, h), (226, 218, 232), (255, 255, 255), scale=90), Image.new("RGB", (w, h), HANDLE_PURPLE))
     img = Image.blend(img, blur(img, 10), 0.6)
     # ごく淡い星雲のゆらぎ (赤紫と青紫) と、かすかな星のきらめき
-    neb = nebula((w, h), rng, [(236, 220, 244), (255, 255, 255), (232, 236, 255)], scale=160, detail=2)
+    # 星雲のゆらぎ (赤紫 → 紫 → 青紫)、細い稲妻、星のきらめき
+    neb = nebula((w, h), rng, [(196, 168, 222), (236, 222, 246), (255, 255, 255), (214, 220, 255)], scale=150, detail=3)
     img = seamless_v(ImageChops.multiply(img, neb))
-    stars = seamless_v(stardust((w, h), rng, 900, 18))
-    img.paste((222, 206, 240), (0, 0), ImageChops.lighter(blur(stars, 0.5), blur(stars, 3).point(lambda a: a * 0.3)).point(lambda a: a * 0.45))
+    vein = Image.new("L", (w, h), 0)
+    vd = ImageDraw.Draw(vein)
+    for k in range(10):                                     # 柄の長さに沿って走る細い稲妻
+        xa = rng.uniform(0.02, 0.85) * w
+        ya = rng.uniform(0.05, 0.95) * h
+        lightning(vd, (xa, ya), (xa + rng.uniform(0.08, 0.16) * w, ya + rng.uniform(-0.12, 0.12) * h), rng, 1.6 * F, depth=6, spread=0.18, branch=0.3)
+    vein = seamless_v(ImageChops.multiply(vein, ImageChops.invert(blur(gold, 8).point(lambda a: 255 if a > 10 else 0))))
+    vein_glow = blur(vein, 5)
+    img.paste((176, 140, 232), (0, 0), vein_glow.point(lambda a: min(255, a * 1.2)))
+    img.paste((236, 224, 255), (0, 0), blur(vein, 0.6).point(lambda a: a * 0.75))
+    stars = seamless_v(stardust((w, h), rng, 1600, 40))
+    star_glow = blur(stars, 3)
+    img.paste((240, 230, 255), (0, 0), ImageChops.lighter(blur(stars, 0.5), star_glow.point(lambda a: a * 0.35)).point(lambda a: a * 0.7))
 
     # ---- 金の線: ふちは濃く、中央は明るい (丸く盛り上がった線)
     core = blur(gold, 10)   # 線の中央ほど明るい
@@ -481,7 +495,18 @@ def draw_handle(maps):
                                   Image.new("RGB", (w, h), (255, 255, 255)))
     img.paste((150, 110, 50), (0, 0), ImageChops.subtract(blur(inl, 5), inl))   # 象眼のふちの影
     img.paste(inl_img, (0, 0), inl)
-    maps.put(UV_HANDLE, img, Image.new("RGB", (w, h), (0, 0, 0)))
+    # 発光: 地はほのかな紫、金の線はやわらかな金色の光、稲妻と星は強く、象眼は淡く
+    emis = Image.new("RGB", (w, h), (8, 5, 12))    # 地のほのかな光 (一色にしてファイルを軽く)
+    gold_halo = ImageChops.subtract(blur(gold, 9), gold)
+    emis.paste((150, 110, 170), (0, 0), gold_halo.point(lambda a: min(255, a * 1.1)))
+    emis.paste(scale_rgb(gold_img, 0.88), (0, 0), gold)
+    emis.paste((255, 236, 210), (0, 0), blur(shine, 1.2).point(lambda a: a * 0.6))
+    emis.paste((150, 110, 230), (0, 0), vein_glow.point(lambda a: min(255, a * 1.3)))
+    emis.paste(GLOW_WHITE, (0, 0), blur(vein, 0.6))
+    emis.paste((190, 170, 255), (0, 0), star_glow.point(lambda a: a * 0.5))
+    emis.paste(GLOW_WHITE, (0, 0), ImageChops.lighter(blur(stars, 0.5), blur(glint, 0.6)))
+    emis.paste((200, 186, 240), (0, 0), inl.point(lambda a: a * 0.7))
+    maps.put(UV_HANDLE, img, emis)
 
     # 凹凸: 金の線は丸く盛り上がる / 象眼はふくらむ
     maps.bump(UV_HANDLE, blur(gold, 4), 0.16)
@@ -490,56 +515,77 @@ def draw_handle(maps):
 
 # ---------------------------------------------------------------- 小物
 def draw_guard(maps):
-    """刃の付け根の飾り板。guard_tone.png (1 = 薄い紫, 2 = 濃い紫, 3 = 白い巴の下) を幻想的な配色で描く。"""
+    """刃の付け根の飾り板。guard_tone.png (80 = 薄い紫, 160 = 濃い紫, 240 = 白い巴の下, 0 = 外・抜け) を描く。
+    塗り分けはなめらかな曲線に整えてあり、縁の光る線は太さをそろえて引く。"""
     x0, y0, x1, y1 = uv_box(UV_GUARD)
     S = x1 - x0
     span = max(GUARD_A_MAX - GUARD_A_MIN, GUARD_E_MAX - GUARD_E_MIN)
     w = round(S * (GUARD_A_MAX - GUARD_A_MIN) / span)
     h = round(S * (GUARD_E_MAX - GUARD_E_MIN) / span)
+    pad = UV_PAD / (UV_GUARD[2] - UV_GUARD[0])   # make_katana.py の UV は四辺を UV_PAD だけ内側に寄せている
+    off = round(S * pad)
+    w, h = round(w * (1 - 2 * pad)), round(h * (1 - 2 * pad))
     rng = random.Random(53)
     light_col = (184, 144, 200)          # 写真: 灰みのある薄紫
     img = Image.new("RGB", (S, S), light_col)             # 余白 (側面) は薄紫
-    emis = scale_rgb(img, 0.14)
-    if os.path.isfile(GUARD_TONE):
-        tone = Image.open(GUARD_TONE).convert("L").resize((w, h), Image.NEAREST)
-        dark = tone.point(lambda v: 255 if 120 <= v < 200 else 0)
-        dark = blur(dark, 4).point(lambda a: 255 if a > 127 else 0)    # 濃い紫の形をなめらかに
-        dark = blur(dark, 0.8)
-        # 薄い紫: 刀身の地とつながる真珠のような薄紫 / 濃い紫: 赤紫と青紫がゆらぐ星雲
-        lt = ImageChops.multiply(hgradient((w, h), [(0.0, (190, 146, 204)), (0.5, (184, 144, 206)), (1.0, (188, 142, 200))]),
-                                 vgradient((w, h), [(0.0, (255, 255, 255)), (1.0, (238, 234, 246))]))
-        dk = nebula((w, h), rng, [(30, 4, 58), (50, 12, 90), (78, 28, 128), (104, 48, 160)], scale=45)
-        part = lt.copy()
-        halo = ImageChops.subtract(blur(dark, 12), dark)     # 濃い紫のまわりの淡い紫のオーラ
-        part.paste((160, 116, 200), (0, 0), halo.point(lambda a: a * 0.5))
-        part.paste(dk, (0, 0), dark)
-        inner = blur(dark, 2.5).point(lambda a: 255 if a > 245 else 0)
-        rim = blur(ImageChops.subtract(dark.point(lambda a: 255 if a > 127 else 0), inner), 0.6)   # 濃い紫の縁の光る線
-        rim_soft = ImageChops.multiply(blur(rim, 5), dark)
-        part.paste((140, 96, 200), (0, 0), rim_soft.point(lambda a: min(255, a * 1.3)))
-        part.paste((206, 176, 248), (0, 0), rim.point(lambda a: a * 0.9))
-        dust = stardust((w, h), rng, 700, 26, area=dark)
-        dust_glow = blur(dust, 3)
-        part.paste((244, 236, 255), (0, 0), ImageChops.lighter(blur(dust, 0.5), dust_glow.point(lambda a: a * 0.4)))
-        # 上下反転なし: tone の上 = e の大きい側 (刃側) = UV の上
-        img.paste(part, (0, S - h))
-        e_part = scale_rgb(part, 0.10)
-        e_part.paste(scale_rgb(dk, 0.35), (0, 0), dark)
-        e_part.paste((96, 60, 160), (0, 0), halo.point(lambda a: a * 0.5))
-        e_part.paste((150, 110, 230), (0, 0), rim_soft.point(lambda a: min(255, a * 1.3)))
-        e_part.paste((222, 196, 255), (0, 0), rim)
-        e_part.paste((200, 180, 255), (0, 0), dust_glow.point(lambda a: a * 0.5))
-        e_part.paste(GLOW_WHITE, (0, 0), blur(dust, 0.5))
-        emis.paste(e_part, (0, S - h))
-        full_dark = Image.new("L", (S, S), 0)
-        full_dark.paste(dark, (0, S - h))
+    emis = scale_rgb(img, 0.10)
+    if not os.path.isfile(GUARD_TONE):
         maps.put(UV_GUARD, img, emis)
-        maps.bump(UV_GUARD, blur(full_dark, 2), -0.05)    # 濃い紫は彫り込んだように
-        full_rim = Image.new("L", (S, S), 0)
-        full_rim.paste(rim, (0, S - h))
-        maps.bump(UV_GUARD, full_rim, 0.03)
-    else:
-        maps.put(UV_GUARD, img, emis)
+        return
+    tone = Image.open(GUARD_TONE).convert("L").resize((w, h), Image.BOX)
+
+    def cls(lo, hi):
+        m = tone.point(lambda v: 255 if lo <= v < hi else 0)
+        return blur(m, 0.25).point(lambda a: 255 if a > 127 else 0)
+    body = tone.point(lambda v: 255 if v >= 40 else 0)
+    dark = cls(120, 200)
+    swirl = cls(200, 256)
+
+    def ring(m, px):                     # 形のふちの、太さ px の線 (外へはみ出さない)
+        k = 2 * px + 1
+        return blur(ImageChops.subtract(m, m.filter(ImageFilter.MinFilter(k))), 0.5)
+
+    # 薄い紫: 刀身の地とつながる真珠のような薄紫 / 濃い紫: 赤紫と青紫がゆらぐ星雲
+    lt = ImageChops.multiply(hgradient((w, h), [(0.0, (190, 146, 204)), (0.5, (184, 144, 206)), (1.0, (188, 142, 200))]),
+                             vgradient((w, h), [(0.0, (255, 255, 255)), (1.0, (238, 234, 246))]))
+    dk = nebula((w, h), rng, [(30, 4, 58), (50, 12, 90), (78, 28, 128), (104, 48, 160)], scale=45)
+    part = lt.copy()
+    halo = ImageChops.multiply(ImageChops.subtract(blur(dark, 10), dark), body)   # 濃い紫のまわりの淡いオーラ
+    part.paste((160, 116, 200), (0, 0), halo.point(lambda a: a * 0.5))
+    part.paste(dk, (0, 0), blur(dark, 0.6))
+    rim = ring(dark, int(1.6 * F))                                  # 濃い紫の縁: 太さのそろった光る線
+    rim_soft = ImageChops.multiply(blur(rim, 5), dark)              # 線の内側のやわらかな光
+    outline = ring(body, int(1.2 * F))                              # 飾り板の輪郭と抜けのふちの細い線
+    fade = hgradient((w, h), [(0.0, (255, 255, 255)), ((0.072 - GUARD_A_MIN) / (GUARD_A_MAX - GUARD_A_MIN), (255, 255, 255)),
+                              ((0.084 - GUARD_A_MIN) / (GUARD_A_MAX - GUARD_A_MIN), (0, 0, 0)), (1.0, (0, 0, 0))]).convert("L")
+    outline = ImageChops.multiply(outline, fade)                    # 刀身と重なる先の方には引かない
+    s_halo = ImageChops.multiply(ImageChops.subtract(blur(swirl, 9), swirl), body)   # 白い巴のまわりの光
+    part.paste((140, 96, 200), (0, 0), rim_soft.point(lambda a: min(255, a * 1.3)))
+    part.paste((176, 140, 236), (0, 0), s_halo.point(lambda a: min(255, a * 1.2)))
+    part.paste((222, 198, 255), (0, 0), rim)
+    part.paste((214, 190, 252), (0, 0), outline.point(lambda a: a * 0.8))
+    dust = stardust((w, h), rng, 700, 26, area=dark)
+    dust_glow = blur(dust, 3)
+    part.paste((244, 236, 255), (0, 0), ImageChops.lighter(blur(dust, 0.5), dust_glow.point(lambda a: a * 0.4)))
+    # 上下反転なし: tone の上 = e の大きい側 (刃側) = UV の上
+    img.paste(part, (off, S - off - h))
+    e_part = scale_rgb(part, 0.10)
+    e_part.paste(scale_rgb(dk, 0.35), (0, 0), dark)
+    e_part.paste((96, 60, 160), (0, 0), halo.point(lambda a: a * 0.5))
+    e_part.paste((150, 110, 230), (0, 0), rim_soft.point(lambda a: min(255, a * 1.3)))
+    e_part.paste((170, 130, 255), (0, 0), s_halo.point(lambda a: min(255, a * 1.4)))
+    e_part.paste((232, 212, 255), (0, 0), rim)
+    e_part.paste((190, 160, 250), (0, 0), outline.point(lambda a: a * 0.7))
+    e_part.paste((200, 180, 255), (0, 0), dust_glow.point(lambda a: a * 0.5))
+    e_part.paste(GLOW_WHITE, (0, 0), blur(dust, 0.5))
+    emis.paste(e_part, (off, S - off - h))
+    maps.put(UV_GUARD, img, emis)
+    full = Image.new("L", (S, S), 0)
+    full.paste(dark, (off, S - off - h))
+    maps.bump(UV_GUARD, blur(full, 2), -0.05)    # 濃い紫は彫り込んだように
+    full = Image.new("L", (S, S), 0)
+    full.paste(ImageChops.lighter(rim, outline), (off, S - off - h))
+    maps.bump(UV_GUARD, full, 0.03)
 
 
 def draw_white(maps):
@@ -601,7 +647,12 @@ def draw_tsuba(maps):
     img.paste(lacquer, (0, 0), lac)
     img.paste((150, 112, 210), (0, 0), ImageChops.offset(lac, int(-2 * F), int(-2 * F)).point(lambda a: a // 5))   # 漆のつや
     img.paste((252, 228, 196), (0, 0), blur(dots, 0.7))
-    maps.put(UV_TSUBA, img, Image.new("RGB", (w, h), (0, 0, 0)))
+    emis = Image.new("RGB", (w, h), (0, 0, 0))                          # 暗い所で稲妻の象嵌が紫に、星が金に光る
+    emis.paste((80, 50, 150), (0, 0), blur(lac, 6).point(lambda a: min(255, a * 1.2)))
+    emis.paste((170, 120, 255), (0, 0), lac)
+    emis.paste((255, 220, 170), (0, 0), blur(dots, 0.7))
+    emis.paste((150, 110, 70), (0, 0), blur(dots, 5).point(lambda a: min(255, a * 1.5)))
+    maps.put(UV_TSUBA, img, emis)
     hgt = Image.fromarray(np.clip((0.5 + hammer * 0.3 * (1 - rim) - 0.8 * groove) * 255, 0, 255).astype(np.uint8), "L")
     maps.bump(UV_TSUBA, hgt, 0.08)
     maps.bump(UV_TSUBA, blur(lac, 1.2), -0.10)
@@ -618,7 +669,8 @@ def draw_stud(maps):
     stops = [(0.0, (255, 254, 255)), (0.45, (246, 238, 250)), (0.7, (230, 216, 244)), (0.88, (212, 214, 240)), (1.0, (196, 188, 220))]
     lut = np.array([lerp_color(stops, i / 255) for i in range(256)], np.float32)
     img = lut[(r ** 1.3 * 255).astype(np.uint8)]
-    maps.put(UV_STUD, Image.fromarray(img.astype(np.uint8), "RGB"), Image.new("RGB", (w, h), (0, 0, 0)))
+    im = Image.fromarray(img.astype(np.uint8), "RGB")
+    maps.put(UV_STUD, im, scale_rgb(im, 0.6))          # 真珠のように淡く光る
 
 
 def draw_cord(maps):
@@ -630,7 +682,8 @@ def draw_cord(maps):
     fine = np.sin((xx / w * 12 - yy / h * 900) * math.tau) * 0.5 + 0.5     # 細い糸
     shade = 0.88 + 0.08 * twist + 0.04 * fine
     img = np.stack([c * shade for c in CORD_RED], -1)
-    maps.put(UV_CORD, Image.fromarray(np.clip(img, 0, 255).astype(np.uint8), "RGB"), Image.new("RGB", (w, h), (0, 0, 0)))
+    im = Image.fromarray(np.clip(img, 0, 255).astype(np.uint8), "RGB")
+    maps.put(UV_CORD, im, scale_rgb(im, 0.12))         # 暗い所でもほのかに赤が見える
     maps.bump(UV_CORD, Image.fromarray((twist * 255).astype(np.uint8), "L"), 0.035)
 
 
@@ -644,7 +697,8 @@ def main():
     draw_stud(maps)
     draw_cord(maps)
     maps.albedo.save(OUT_ALBEDO, optimize=True)
-    maps.emission.save(OUT_EMISSION, optimize=True)
+    # 発光は 4096 で十分 (光のにじみは細部が見えない)。ファイルを軽くするため半分の大きさで保存
+    maps.emission.resize((SIZE // 2, SIZE // 2), Image.LANCZOS).save(OUT_EMISSION, optimize=True)
     maps.normal_map().save(OUT_NORMAL, optimize=True)
     for p in (OUT_ALBEDO, OUT_EMISSION, OUT_NORMAL):
         print("saved:", p)
