@@ -192,7 +192,7 @@ def load_texture(name):
     return img
 
 
-def make_material(name, albedo, normal, roughness, emission_img=None, emission=0.0):
+def make_material(name, albedo, normal, roughness, emission_img=None, emission=0.0, metallic=0.0):
     old = bpy.data.materials.get(name)
     if old:
         bpy.data.materials.remove(old)
@@ -206,6 +206,7 @@ def make_material(name, albedo, normal, roughness, emission_img=None, emission=0
     tex.location = (-500, 300)
     nt.links.new(tex.outputs["Color"], bsdf.inputs["Base Color"])
     bsdf.inputs["Roughness"].default_value = roughness
+    bsdf.inputs["Metallic"].default_value = metallic
     # ノーマルマップ (柄巻きの盛り上がり・金の彫り・模様の縁の溝)
     ntex = nt.nodes.new("ShaderNodeTexImage")
     ntex.image = normal
@@ -545,7 +546,7 @@ def build_scene():
 
     me, origin = build_mesh()
     albedo, emis, normal = (load_texture(n) for n in TEXTURES)
-    me.materials.append(make_material(BLADE_MATERIAL, albedo, normal, roughness=0.3, emission_img=emis, emission=1.5))
+    me.materials.append(make_material(BLADE_MATERIAL, albedo, normal, roughness=0.25, emission_img=emis, emission=1.5, metallic=0.35))
     me.materials.append(make_material(HILT_MATERIAL, albedo, normal, roughness=0.35, emission_img=emis, emission=1.0))
     katana = bpy.data.objects.new(OBJECT_NAME, me)
     coll.objects.link(katana)

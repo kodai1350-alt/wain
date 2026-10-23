@@ -99,6 +99,11 @@ def vgradient(size, stops):
     return img.resize((w, h))
 
 
+def vgradient_v(size, stops):
+    """刀身用: UV の縦 v (0 = 刃先 = 画像の下, 1 = 峰 = 画像の上) で指定する縦のグラデーション。"""
+    return vgradient(size, [(1 - s, c) for s, c in reversed(stops)])
+
+
 def blur(img, r):
     return img.filter(ImageFilter.GaussianBlur(r * F))
 
@@ -271,8 +276,9 @@ def grain(size, along=40, across=1.2, amount=1.0):
 
 
 def draw_blade(maps):
-    """刀身。写真の配色 (灰みのある薄紫の地・深い紫の炎の模様・銀白の刃先) を土台に、
-    真珠のような地の移ろい、地肌の流れ、星雲の模様、光る縁取り、稲妻、星のきらめきで幻想的に。"""
+    """刀身。写真の配色 (灰みのある薄紫の地・深い紫の炎の模様・銀白の刃先) を土台に、本物の刀の鋼の見え方:
+    平地の板目・杢目の地肌、鏡のように磨いた鎬地と磨きの筋、光る鎬の稜線、横手、霜のように白い刃文と足・沸、
+    切っ先の帽子。その上に星雲の模様、光る縁取り、稲妻、星のきらめきで幻想的に。"""
     x0, y0, x1, y1 = uv_box(UV_BLADE)
     w, h = x1 - x0, y1 - y0
     rng = random.Random(11)
@@ -283,41 +289,92 @@ def draw_blade(maps):
     # ---- 地: 真珠のように根元 → 切っ先へ移ろう薄紫 (桜色寄り → 青み → 切っ先は明るく)
     tint = hgradient((w, h), [(0.0, (188, 142, 200)), (0.25, (194, 144, 204)), (0.50, (182, 142, 206)),
                               (0.72, (174, 148, 212)), (0.90, (190, 160, 218)), (1.0, (214, 190, 230))])
-    # 鎬 (v 0.36) に沿った磨きの光の筋と、峰側のわずかな陰
-    shade = vgradient((w, h), [(0.0, (255, 255, 255)), (0.30, (250, 248, 254)), (0.36, (255, 255, 255)),
-                               (0.42, (246, 242, 250)), (0.80, (240, 236, 248)), (1.0, (250, 248, 255))])
+    # 鋼の面の明るさ (UV の縦: 0 = 刃先, 0.55 = 鎬, 0.85 = 峰の肩, 1 = 峰の頂)
+    #   平地: 鎬に近いほど明るい磨きの光 / 鎬: 細く光る稜線 / 鎬地: 鏡のように磨き込んだ一段深い色 / 峰: 中くらい
+    #   (トゥーン系のシェーダーでも金属らしく見えるよう、磨いた鋼の明暗を描き込む)
+    shade = vgradient_v((w, h), [(0.0, (226, 224, 234)), (0.015, (255, 255, 255)), (0.20, (250, 248, 254)),
+                               (0.30, (222, 216, 234)), (0.40, (246, 242, 252)), (0.46, (255, 255, 255)),
+                               (0.51, (244, 240, 250)), (0.545, (255, 255, 255)), (0.552, (255, 255, 255)),
+                               (0.566, (146, 138, 172)), (0.66, (128, 120, 158)), (0.77, (146, 138, 174)),
+                               (0.825, (226, 220, 240)), (0.845, (170, 162, 194)), (0.86, (236, 232, 246)),
+                               (0.93, (210, 204, 230)), (1.0, (186, 180, 210))])
     img = ImageChops.multiply(tint, shade)
-    gr = blur(grain((w, h), along=140, across=3.0, amount=0.9), 1.5)       # 地肌のやわらかな流れ
-    img = ImageChops.multiply(img, Image.merge("RGB", [gr.point(lambda v: int(248 + (v - 128) * 0.05))] * 3))
+    base_glow = img.copy()                                              # 発光の土台 (細部なし)
+    yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+    V = 1 - yy / (h - 1)
+    # 平地の地肌: 板目・杢目 (木目のように流れて渦を巻く鍛えの模様)。ゆがませた等高線で描く
+    n1 = np.asarray(Image.effect_noise((max(2, w // int(90 * F)), max(2, h // int(14 * F))), 60)
+                    .resize((w, h), Image.BICUBIC), np.float32) / 255.0
+    n2 = np.asarray(Image.effect_noise((max(2, w // int(30 * F)), max(2, h // int(6 * F))), 60)
+                    .resize((w, h), Image.BICUBIC), np.float32) / 255.0
+    wood = np.sin((V * 80 + n1 * 14.0 + n2 * 3.0) * math.tau) * 0.5 + 0.5
+    wood = wood ** 4                                                      # 細い木目の線に
+    hira = np.clip((0.535 - V) / 0.02, 0, 1) * np.clip(V / 0.03, 0, 1)
+    jihada = Image.fromarray((wood * hira * 255).astype(np.uint8), "L")
+    img.paste((150, 112, 176), (0, 0), blur(jihada, 0.7).point(lambda a: a * 0.07))
+    img.paste((246, 236, 255), (0, 0), ImageChops.offset(blur(jihada, 0.7), 0, int(1 * F)).point(lambda a: a * 0.05))
+    # 鎬地の磨きの筋: 長さ方向にまっすぐ流れる細い線 (鏡のように磨き込んだ跡)
+    pol = np.asarray(Image.effect_noise((max(2, w // int(400 * F)), max(2, int(h / (0.9 * F)))), 50)
+                     .resize((w, h), Image.BICUBIC), np.float32) / 255.0 - 0.5
+    sj = np.clip((V - 0.56) / 0.01, 0, 1) * np.clip((0.84 - V) / 0.01, 0, 1)
+    polish = blur(Image.fromarray(np.clip(128 + pol * sj * 26, 0, 255).astype(np.uint8), "L"), 0.6)
+    img = ImageChops.add(ImageChops.subtract(img, Image.merge("RGB", [polish.point(lambda a: max(0, 128 - a))] * 3)),
+                         Image.merge("RGB", [polish.point(lambda a: max(0, a - 128))] * 3))
+    del n1, n2, wood, hira, pol, sj, yy, xx, V
+    # 鎬の稜線と、刃先のごく細い研ぎ澄ました線
+    lines = Image.new("L", (w, h), 0)
+    ld = ImageDraw.Draw(lines)
+    ld.line([(0, Y(0.55)), (w, Y(0.55))], fill=255, width=max(1, int(2 * F)))
+    img.paste((252, 248, 255), (0, 0), blur(lines, 1.0).point(lambda a: a * 0.7))
+    yok = int(w * 0.88)                                                   # 横手: 切っ先の始まりの線
+    yl = Image.new("L", (w, h), 0)
+    ImageDraw.Draw(yl).line([(yok, Y(0.0)), (yok, Y(0.55))], fill=255, width=max(1, int(2 * F)))
+    img.paste((150, 120, 180), (0, 0), blur(yl, 0.8).point(lambda a: a * 0.6))
+    img.paste((250, 246, 255), (0, 0), ImageChops.offset(blur(yl, 0.8), int(2 * F), 0).point(lambda a: a * 0.6))
 
-    # ---- 刃文: 刃先の銀白の帯 (のたれ + 互の目)。刃先ほど明るく、境目に淡い紫の匂と光る沸
+    # ---- 刃文: 霜のように白い匂の帯 (のたれに互の目)。切っ先では帽子として小丸に返る
     hamon = [(0, Y(0.0))]
     ph = rng.uniform(0, math.tau)
     for xi in range(0, w + 1, int(8 * F)):
         u = xi / w
-        v = 0.15 + 0.025 * math.sin(u * 46 + ph) + 0.012 * math.sin(u * 151 + ph * 2) + 0.008 * math.sin(u * 377)
-        v *= 1.0 if u < 0.9 else max(0.2, 1 - (u - 0.9) * 6)
+        v = 0.17 + 0.03 * math.sin(u * 46 + ph) + 0.015 * math.sin(u * 151 + ph * 2) + 0.01 * abs(math.sin(u * 377))
+        if u > 0.88:                                                      # 帽子: 横手から先はおだやかに、先端で返る
+            v = 0.17 + 0.01 * math.sin(u * 151)
+            if u > 0.97:
+                v *= max(0.0, 1 - (u - 0.97) / 0.03) ** 0.5
         hamon.append((xi, Y(v)))
     hamon.append((w, Y(0.0)))
     hm = Image.new("L", (w, h), 0)
     ImageDraw.Draw(hm).polygon(hamon, fill=255)
-    hm_soft = blur(hm, 2)
-    edge_col = ImageChops.multiply(vgradient((w, h), [(0.0, (244, 242, 250)), (0.12, (228, 224, 236)), (0.2, (214, 208, 228)), (1.0, (214, 208, 228))]),
-                                   Image.merge("RGB", [gr.point(lambda v: int(252 + (v - 128) * 0.03))] * 3))
+    hm_soft = blur(hm, 3)
+    edge_col = vgradient_v((w, h), [(0.0, (248, 248, 252)), (0.03, (236, 234, 244)), (0.10, (232, 230, 242)),
+                                  (0.2, (226, 222, 238)), (1.0, (226, 222, 238))])
+    frost = nebula((w, h), rng, [(226, 222, 238), (240, 238, 248), (250, 250, 255)], scale=70, detail=2)
+    edge_col = ImageChops.multiply(edge_col, Image.blend(frost, Image.new("RGB", (w, h), (255, 255, 255)), 0.35))
     img.paste(edge_col, (0, 0), hm_soft)
-    utsuri = ImageChops.subtract(blur(hm, 18), hm)                     # 刃文の上の霞のような映り
-    img.paste((214, 196, 232), (0, 0), utsuri.point(lambda a: a * 0.35))
-    nioi = Image.new("L", (w, h), 0)                                     # 匂口: 淡い紫に光る細い線
-    ImageDraw.Draw(nioi).line(hamon[1:-1], fill=255, width=int(3 * F))
-    nioi = blur(nioi, 2)
-    img.paste((206, 180, 236), (0, 0), nioi.point(lambda a: a * 0.6))
-    nie = Image.new("L", (w, h), 0)                                      # 沸: 刃文の境目のきらめき
+    # 足: 刃文の境目から刃先へ向かう細い筋
+    ashi = Image.new("L", (w, h), 0)
+    ad = ImageDraw.Draw(ashi)
+    for (xa, ya) in hamon[1:-1:3]:
+        if rng.random() < 0.55 and xa < w * 0.97:
+            ln = h * rng.uniform(0.03, 0.07)
+            ad.line([(xa, ya), (xa + rng.uniform(-3, 3) * F, ya + ln)], fill=rng.randint(120, 220), width=max(1, int(1.6 * F)))
+    ashi = ImageChops.multiply(blur(ashi, 1.2), hm)
+    img.paste((204, 196, 224), (0, 0), ashi.point(lambda a: a * 0.55))
+    # 匂口: 境目の白く明るい霞と、その上の淡い紫の映り
+    nioi = Image.new("L", (w, h), 0)
+    ImageDraw.Draw(nioi).line(hamon[1:-1], fill=255, width=int(5 * F))
+    nioi = blur(nioi, 3)
+    img.paste((250, 248, 255), (0, 0), nioi.point(lambda a: a * 0.7))
+    utsuri = ImageChops.subtract(blur(hm, 22), hm)
+    img.paste((216, 200, 236), (0, 0), utsuri.point(lambda a: a * 0.35))
+    nie = Image.new("L", (w, h), 0)                                      # 沸: 刃文の境目の銀砂のようなきらめき
     nd = ImageDraw.Draw(nie)
     for (xa, ya) in hamon[1:-1]:
-        for _ in range(2):
-            r = rng.uniform(0.5, 1.5) * F
-            yy = ya + rng.uniform(-10, 6) * F
-            nd.ellipse([xa - r, yy - r, xa + r, yy + r], fill=rng.randint(140, 255))
+        for _ in range(3):
+            r = rng.uniform(0.5, 1.4) * F
+            yy_ = ya + rng.uniform(-12, 8) * F
+            nd.ellipse([xa - r, yy_ - r, xa + r, yy_ + r], fill=rng.randint(140, 255))
 
     # ---- 中央の紫の模様: なめらかに揺らめく炎の形 (形は前と同じ)
     start, end = w * 0.075, w * 0.84
@@ -366,6 +423,7 @@ def draw_blade(maps):
         sd.line(pts, fill=255, width=int(rng.uniform(8, 18) * F))
     silk = blur(silk, 9)
     core.paste((150, 104, 210), (0, 0), silk.point(lambda a: a * 0.30))
+    core = ImageChops.multiply(core, Image.blend(shade, Image.new("RGB", (w, h), (255, 255, 255)), 0.45))   # 模様にも鋼の明暗
     img.paste(core, (0, 0), mask)
     # 縁取り: 内側の細く明るい線 + その内側のやわらかな光
     inner = blur(hard, 3).point(lambda a: 255 if a > 240 else 0)
@@ -402,8 +460,8 @@ def draw_blade(maps):
     img.paste(GLOW_WHITE, (0, 0), blur(nie, 0.6).point(lambda a: a * 0.7))
 
     # ---- 発光: 昼は写真の色のまま、暗い所では模様の縁・稲妻・星・刃文が光る
-    emis = scale_rgb(ImageChops.multiply(tint, shade), 0.10)   # 地のほのかな光 (地肌の細部は省いてファイルを軽く)
-    emis.paste(scale_rgb(edge_col, 0.10), (0, 0), hm_soft)
+    emis = scale_rgb(base_glow, 0.10)               # 地のほのかな光 (地肌の細部は省いてファイルを軽く)
+    emis.paste(scale_rgb(edge_col, 0.12), (0, 0), hm_soft)
     emis.paste(scale_rgb(blur(core, 3), 0.35), (0, 0), mask)
     emis.paste((96, 60, 160), (0, 0), halo.point(lambda a: a * 0.6))
     emis.paste((150, 110, 230), (0, 0), rim_soft.point(lambda a: min(255, a * 1.4)))
@@ -416,10 +474,11 @@ def draw_blade(maps):
     emis.paste(GLOW_WHITE, (0, 0), ImageChops.lighter(blur(dust, 0.5), blur(nie, 0.6)))
     maps.put(UV_BLADE, img, emis)
 
-    # 凹凸: 模様はなめらかに彫り込み、縁取りはわずかに盛り上がる。地肌の流れ
+    # 凹凸: 模様はなめらかに彫り込み、縁取りはわずかに盛り上がる。地肌と横手
     maps.bump(UV_BLADE, blur(hard, 2.5), -0.05)
     maps.bump(UV_BLADE, rim, 0.03)
-    maps.bump(UV_BLADE, gr, 0.008)
+    maps.bump(UV_BLADE, blur(jihada, 1.0), 0.006)                     # 地肌のわずかな起伏
+    maps.bump(UV_BLADE, blur(yl, 0.8), -0.04)                         # 横手の線
 
 
 # ---------------------------------------------------------------- 柄
